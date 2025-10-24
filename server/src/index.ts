@@ -9,7 +9,7 @@ import path from 'path';
 
 import { setupRoutes } from './routes';
 import { setupSocketHandlers } from './collaboration/socketHandlers';
-import { initializeDatabase } from './db/connection';
+import { initializeDatabase, closeDatabase } from './db/connection';
 
 // ✅ Load environment variables desde la raíz del proyecto
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
