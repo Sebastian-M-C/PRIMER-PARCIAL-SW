@@ -20,7 +20,7 @@ import Konva from 'konva';
  * @property {Function} confirmarRelacion - Confirma la creación de la relación
  * @property {Function} cancelarRelacion - Cancela la creación de la relación
  */
-export const useCreacionRelaciones = (agregarRelacion, clases) => {
+export const useCreacionRelaciones = (agregarRelacion, clases, stageRef) => {
   const [creandoRelacion, setCreandoRelacion] = useState(false);
   const [inicioRelacion, setInicioRelacion] = useState(null);
   const [puntoFinalTemporal, setPuntoFinalTemporal] = useState(null);
@@ -33,6 +33,50 @@ export const useCreacionRelaciones = (agregarRelacion, clases) => {
   const rafRef = useRef(null);
   const SMOOTH_FACTOR = 0.18; // menor = más suave
   const connectionTension = 0.5; // exponer para CanvasStage (Konva.Line tension)
+
+
+
+  const disableAllNodeDragging = useCallback(() => {
+    try {
+      const stage = stageRef?.current;
+      if (!stage) return;
+
+      // detener arrastre activo y desactivar draggable en todos los nodos de clase
+      stage.find('.class-node').each((node) => {
+        try {
+          if (typeof node.stopDrag === 'function') node.stopDrag();
+          if (typeof node.draggable === 'function') node.draggable(false);
+        } catch (err) { /* noop */ }
+      });
+
+      // liberar puntero: disparar mouseup/touchend en el container para asegurar que el browser
+      // deje de mantener el pointer capture (esto termina drags iniciados)
+      const container = stage.container();
+      if (container) {
+        container.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+        container.dispatchEvent(new TouchEvent('touchend', { bubbles: true })); // puede fallar en algunos entornos -> atrapamos
+      }
+    } catch (err) { /* noop */ }
+  }, [stageRef]);
+
+  const enableAllNodeDragging = useCallback(() => {
+    try {
+      const stage = stageRef?.current;
+      if (!stage) return;
+      stage.find('.class-node').each((node) => {
+        try { if (typeof node.draggable === 'function') node.draggable(true); } catch (e) { /* noop */ }
+      });
+    } catch (err) { /* noop */ }
+  }, [stageRef]);
+
+  // observar el estado del modal para asegurar re-enable si se cierra por otra vía
+  useEffect(() => {
+    if (mostrarModalRelacion) {
+      disableAllNodeDragging();
+    } else {
+      enableAllNodeDragging();
+    }
+  }, [mostrarModalRelacion, disableAllNodeDragging, enableAllNodeDragging]);
 
   // iniciar animación de seguimiento suave
   const startSmoothFollow = useCallback(() => {
@@ -90,12 +134,12 @@ export const useCreacionRelaciones = (agregarRelacion, clases) => {
   const manejarClickClase = useCallback((idClase, seleccionarClase) => {
     if (creandoRelacion && inicioRelacion && inicioRelacion.classId !== idClase) {
       // Completar creación de relación
-      setRelacionPendiente({ 
-        sourceId: inicioRelacion.classId, 
-        targetId: idClase 
+      setRelacionPendiente({
+        sourceId: inicioRelacion.classId,
+        targetId: idClase
       });
       setMostrarModalRelacion(true);
-
+      disableAllNodeDragging();
       // detener suavizado
       stopSmoothFollow();
 
@@ -106,7 +150,7 @@ export const useCreacionRelaciones = (agregarRelacion, clases) => {
       // Selección normal de clase
       seleccionarClase(idClase);
     }
-  }, [creandoRelacion, inicioRelacion, stopSmoothFollow]);
+  }, [creandoRelacion, inicioRelacion, stopSmoothFollow , disableAllNodeDragging]);
 
   /**
    * Maneja clicks en el stage (área vacía) durante la creación de relación
@@ -174,6 +218,7 @@ export const useCreacionRelaciones = (agregarRelacion, clases) => {
     }
     setRelacionPendiente(null);
     setMostrarModalRelacion(false);
+    // enableAllNodeDragging() se ejecuta desde el effect anterior
     stopSmoothFollow();
   }, [relacionPendiente, agregarRelacion, stopSmoothFollow]);
 
@@ -183,18 +228,19 @@ export const useCreacionRelaciones = (agregarRelacion, clases) => {
   const cancelarRelacion = useCallback(() => {
     setRelacionPendiente(null);
     setMostrarModalRelacion(false);
+    enableAllNodeDragging();
     stopSmoothFollow();
-  }, [stopSmoothFollow]);
+  }, [stopSmoothFollow, enableAllNodeDragging]);
 
   /**
    * Obtiene los nombres de las clases para el modal
    */
   const obtenerNombresClases = useCallback(() => {
     if (!relacionPendiente) return { nombreOrigen: 'Desconocido', nombreDestino: 'Desconocido' };
-    
+
     const claseOrigen = clases.find(c => c.id === relacionPendiente.sourceId);
     const claseDestino = clases.find(c => c.id === relacionPendiente.targetId);
-    
+
     return {
       nombreOrigen: claseOrigen?.name || 'Desconocido',
       nombreDestino: claseDestino?.name || 'Desconocido'
@@ -205,8 +251,10 @@ export const useCreacionRelaciones = (agregarRelacion, clases) => {
   useEffect(() => {
     return () => {
       stopSmoothFollow();
+      // asegurar re-enable por si acaso
+      try { enableAllNodeDragging(); } catch (e) {}
     };
-  }, [stopSmoothFollow]);
+  }, [stopSmoothFollow, enableAllNodeDragging]);
 
   return {
     // Estado

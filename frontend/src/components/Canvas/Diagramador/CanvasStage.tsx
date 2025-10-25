@@ -29,7 +29,10 @@ interface CanvasStageProps {
   onNodeDragStart: () => void;
   onNodeDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => void;
   onConnectionStart: (classId: string, x: number, y: number) => void;
-  onHandleDragMove?: (pos: { x: number; y: number }) => void; // <-- nuevo
+  onHandleDragMove?: (pos: { x: number; y: number }) => void;
+
+  // <-- nuevo prop para desactivar draggable en los nodos cuando corresponda
+  disableNodesDragging?: boolean;
 }
 
 export const CanvasStage: React.FC<CanvasStageProps> = memo(({
@@ -55,7 +58,8 @@ export const CanvasStage: React.FC<CanvasStageProps> = memo(({
   onNodeDragStart,
   onNodeDragEnd,
   onConnectionStart,
-  onHandleDragMove // <-- asegúrate que este prop existe en la interfaz
+  onHandleDragMove,
+  disableNodesDragging = false // <-- default false
 }) => {
 
   const pointerToStageCoords = (stage: Konva.Stage | null) => {
@@ -165,7 +169,8 @@ export const CanvasStage: React.FC<CanvasStageProps> = memo(({
               fill="#007bff"
               stroke="#fff"
               strokeWidth={1}
-              draggable
+              // <-- desactivar handle si los nodos están bloqueados por modal
+              draggable={!disableNodesDragging}
               onDragMove={(e) => {
                 const stage = (stageRef && stageRef.current) || e.target.getStage();
                 const pos = pointerToStageCoords(stage);
@@ -194,6 +199,8 @@ export const CanvasStage: React.FC<CanvasStageProps> = memo(({
             onDragStart={onNodeDragStart}
             onDragEnd={onNodeDragEnd}
             onConnectionStart={onConnectionStart}
+            // <-- prop que evita draggable por modal
+            disableDragging={disableNodesDragging}
           />
         ))}
       </Layer>

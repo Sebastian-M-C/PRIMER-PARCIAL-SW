@@ -71,6 +71,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
 
   /**
    * Hook para manejar creación de relaciones
+   * -- NOTE: ahora pasamos referenciaStage para que el hook pueda forzar stopDrag/dispatch mouseup
    */
   const {
     creandoRelacion,
@@ -88,7 +89,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     setMostrarModalRelacion,
     connectionTension, // <-- existente
     actualizarPuntoFinal // <-- nuevo exportado desde el hook
-  } = useCreacionRelaciones(addRelation, diagram?.classes || []);
+  } = useCreacionRelaciones(addRelation, diagram?.classes || [], referenciaStage); // <-- referenciaStage añadido
 
   /**
    * Hook para manejar arrastre de nodos
@@ -165,7 +166,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
         connectionTension={connectionTension}
         onStageClick={manejarClickStageCombinado}
         onStageMouseMove={manejarMovimientoMouse}
-        onHandleDragMove={({ x, y }) => actualizarPuntoFinal(x, y)} // <-- importante
+        onHandleDragMove={({ x, y }) => actualizarPuntoFinal(x, y)}
         onWheel={manejarRueda}
         onStageDragEnd={manejarFinArrastreStage}
         onClassClick={manejarClickClaseCombinado}
@@ -173,6 +174,9 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
         onNodeDragStart={manejarInicioArrastreNodo}
         onNodeDragEnd={manejarFinArrastreNodo}
         onConnectionStart={iniciarConexion}
+
+        // <-- nuevo: indicar si debemos desactivar el drag de nodos globalmente
+        disableNodesDragging={mostrarModalRelacion}
       />
 
       {/* Controles de vista */}

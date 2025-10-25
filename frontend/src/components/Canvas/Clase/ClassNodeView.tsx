@@ -16,7 +16,8 @@ interface ClassNodeViewProps {
   onDragStart: (e: Konva.KonvaEventObject<DragEvent>) => void;
   onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => void;
   onConnectionPointClick?: (e: Konva.KonvaEventObject<MouseEvent>, x: number, y: number) => void;
-  onConnectionPointMouseDown?: (e: Konva.KonvaEventObject<MouseEvent>, x: number, y: number) => void; // <-- nuevo
+  onConnectionPointMouseDown?: (e: Konva.KonvaEventObject<MouseEvent>, x: number, y: number) => void;
+  disableDragging?: boolean; // nuevo
 }
 
 export const ClassNodeView: React.FC<ClassNodeViewProps> = ({
@@ -30,7 +31,8 @@ export const ClassNodeView: React.FC<ClassNodeViewProps> = ({
   onDragStart,
   onDragEnd,
   onConnectionPointClick,
-  onConnectionPointMouseDown
+  onConnectionPointMouseDown,
+  disableDragging = false
 }) => {
   const { position = {}, width = 180, name = '', attributes = [], methods = [] } = umlClass;
 
@@ -73,10 +75,11 @@ export const ClassNodeView: React.FC<ClassNodeViewProps> = ({
 
   return (
     <Group
-      id={String(umlClass.id)}
+      id={String(umlClass.id)}         // mantener id único para compatibilidad con ConnectionLine u otras búsquedas
+      name={`class-node class-node-${String(umlClass.id)}`} // 'class-node' para find() global + nombre único por id
       x={posX}
       y={posY}
-      draggable={true}                      // usar draggable nativo
+      draggable={!disableDragging}     // desactivar draggable cuando corresponde
       onMouseDown={onMouseDown}
       onClick={onClick}
       onTap={onTap}

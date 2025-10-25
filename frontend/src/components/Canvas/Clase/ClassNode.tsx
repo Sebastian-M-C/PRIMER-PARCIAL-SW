@@ -15,6 +15,7 @@ interface ClassNodeProps {
   onConnectionStart?: (classId: string, x: number, y: number) => void;
   onDragStart?: () => void;
   onDragEnd?: (e: Konva.KonvaEventObject<DragEvent>) => void;
+  disableDragging?: boolean; // nuevo flag (true cuando modal abierto)
 }
 
 export const ClassNode: React.FC<ClassNodeProps> = ({
@@ -27,12 +28,24 @@ export const ClassNode: React.FC<ClassNodeProps> = ({
   diagrama,
   onConnectionStart,
   onDragStart,
-  onDragEnd
+  onDragEnd,
+  disableDragging = false
 }) => {
   // Hook para arrastre (si tu hook lo aporta, lo puedes mantener; aquí preferimos usar handlers nativos)
   const {
     manejarFinArrastreNodo
   } = useDragNodos(referenciaStage, onUpdate, diagrama);
+
+  const handleDragStart = (e: Konva.KonvaEventObject<DragEvent>) => {
+    if (disableDragging) {
+      // evitar que comienze el drag si está deshabilitado
+      try { e.target.stopDrag(); } catch (err) {}
+      return;
+    }
+    if (onDragStart) onDragStart();
+  };
+
+
 
   const handleClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
     e.cancelBubble = true;
@@ -68,26 +81,22 @@ export const ClassNode: React.FC<ClassNodeProps> = ({
       const target = e.target as any;
       const parent = typeof target.getParent === 'function' ? target.getParent() : null;
       if (parent) {
-        // desactivar draggable inmediatamente para evitar inicio de arrastre
+        // desactivar draggable inmediatamente y detener arrastre en curso
         if (typeof parent.draggable === 'function') parent.draggable(false);
         if (typeof parent.stopDrag === 'function') parent.stopDrag();
-
-        // reactivar draggable después de un breve retardo (o se puede reactivar
-        // desde la lógica de creación de relaciones cuando corresponda)
-        setTimeout(() => {
-          try {
-            if (typeof parent.draggable === 'function') parent.draggable(true);
-          } catch (err) { /* noop */ }
-        }, 200);
+        // NO reactivar aquí: la reactivación la gestiona useCreacionRelaciones cuando el modal cierre
       }
     } catch (err) {
-      // no bloquear la UX si algo falla
+      // noop
     }
   };
 
   // onDragEnd: si se pasa onDragEnd desde Canvas lo usamos; si no usamos el que retorna el hook
   const onDragEndHandler = (e: Konva.KonvaEventObject<DragEvent>) => {
-    // priorizar el onDragEnd pasado por props (Canvas), si no usar el del hook
+    if (disableDragging) {
+      try { e.target.stopDrag(); } catch (err) {}
+      return;
+    }
     if (onDragEnd) {
       onDragEnd(e);
     } else {
@@ -104,10 +113,11 @@ export const ClassNode: React.FC<ClassNodeProps> = ({
       onClick={handleClick}
       onTap={handleClick}
       onContextMenu={handleContextMenu}
-      onDragStart={onDragStart ?? (() => {})}
+      onDragStart={handleDragStart}
       onDragEnd={onDragEndHandler}
       onConnectionPointClick={handleConnectionPointClick}
-      onConnectionPointMouseDown={handleConnectionPointMouseDown} // <-- nuevo
+      onConnectionPointMouseDown={handleConnectionPointMouseDown}
+      disableDragging={disableDragging} // prop propagada
     />
   );
 };
