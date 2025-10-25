@@ -59,6 +59,32 @@ export const ClassNode: React.FC<ClassNodeProps> = ({
     }
   };
 
+  // Evitar que el Group padre comience a arrastrarse al presionar el handle
+  const handleConnectionPointMouseDown = (e: Konva.KonvaEventObject<MouseEvent>, x: number, y: number) => {
+    e.cancelBubble = true;
+    e.evt.stopPropagation();
+
+    try {
+      const target = e.target as any;
+      const parent = typeof target.getParent === 'function' ? target.getParent() : null;
+      if (parent) {
+        // desactivar draggable inmediatamente para evitar inicio de arrastre
+        if (typeof parent.draggable === 'function') parent.draggable(false);
+        if (typeof parent.stopDrag === 'function') parent.stopDrag();
+
+        // reactivar draggable después de un breve retardo (o se puede reactivar
+        // desde la lógica de creación de relaciones cuando corresponda)
+        setTimeout(() => {
+          try {
+            if (typeof parent.draggable === 'function') parent.draggable(true);
+          } catch (err) { /* noop */ }
+        }, 200);
+      }
+    } catch (err) {
+      // no bloquear la UX si algo falla
+    }
+  };
+
   // onDragEnd: si se pasa onDragEnd desde Canvas lo usamos; si no usamos el que retorna el hook
   const onDragEndHandler = (e: Konva.KonvaEventObject<DragEvent>) => {
     // priorizar el onDragEnd pasado por props (Canvas), si no usar el del hook
@@ -81,6 +107,7 @@ export const ClassNode: React.FC<ClassNodeProps> = ({
       onDragStart={onDragStart ?? (() => {})}
       onDragEnd={onDragEndHandler}
       onConnectionPointClick={handleConnectionPointClick}
+      onConnectionPointMouseDown={handleConnectionPointMouseDown} // <-- nuevo
     />
   );
 };

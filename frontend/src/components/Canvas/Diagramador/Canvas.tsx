@@ -85,7 +85,9 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     confirmarRelacion,
     cancelarRelacion,
     obtenerNombresClases,
-    setMostrarModalRelacion
+    setMostrarModalRelacion,
+    connectionTension, // <-- existente
+    actualizarPuntoFinal // <-- nuevo exportado desde el hook
   } = useCreacionRelaciones(addRelation, diagram?.classes || []);
 
   /**
@@ -160,8 +162,10 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
         isCreatingRelation={creandoRelacion}
         relationStart={inicioRelacion}
         tempEndPoint={puntoFinalTemporal}
+        connectionTension={connectionTension}
         onStageClick={manejarClickStageCombinado}
         onStageMouseMove={manejarMovimientoMouse}
+        onHandleDragMove={({ x, y }) => actualizarPuntoFinal(x, y)} // <-- nuevo
         onWheel={manejarRueda}
         onStageDragEnd={manejarFinArrastreStage}
         onClassClick={manejarClickClaseCombinado}

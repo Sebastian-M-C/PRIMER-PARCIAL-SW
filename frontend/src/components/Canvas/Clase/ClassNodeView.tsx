@@ -16,6 +16,7 @@ interface ClassNodeViewProps {
   onDragStart: (e: Konva.KonvaEventObject<DragEvent>) => void;
   onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => void;
   onConnectionPointClick?: (e: Konva.KonvaEventObject<MouseEvent>, x: number, y: number) => void;
+  onConnectionPointMouseDown?: (e: Konva.KonvaEventObject<MouseEvent>, x: number, y: number) => void; // <-- nuevo
 }
 
 export const ClassNodeView: React.FC<ClassNodeViewProps> = ({
@@ -28,7 +29,8 @@ export const ClassNodeView: React.FC<ClassNodeViewProps> = ({
   onContextMenu,
   onDragStart,
   onDragEnd,
-  onConnectionPointClick
+  onConnectionPointClick,
+  onConnectionPointMouseDown
 }) => {
   const { position = {}, width = 180, name = '', attributes = [], methods = [] } = umlClass;
 
@@ -161,10 +163,55 @@ export const ClassNodeView: React.FC<ClassNodeViewProps> = ({
       })}
       {isSelected && onConnectionPointClick && (
         <Group>
-          <Circle x={nodeWidth/2} y={0} radius={6} fill="#1976d2" onClick={(e) => onConnectionPointClick(e, nodeWidth/2, 0)} />
-          <Circle x={nodeWidth} y={nodeHeight/2} radius={6} fill="#1976d2" onClick={(e) => onConnectionPointClick(e, nodeWidth, nodeHeight/2)} />
-          <Circle x={nodeWidth/2} y={nodeHeight} radius={6} fill="#1976d2" onClick={(e) => onConnectionPointClick(e, nodeWidth/2, nodeHeight)} />
-          <Circle x={0} y={nodeHeight/2} radius={6} fill="#1976d2" onClick={(e) => onConnectionPointClick(e, 0, nodeHeight/2)} />
+          <Circle
+            x={nodeWidth/2}
+            y={0}
+            radius={6}
+            fill="#1976d2"
+            onMouseDown={(e) => {
+              e.cancelBubble = true;
+              e.evt.stopPropagation();
+              // optar por notificar al padre para desactivar draggable inmediatamente
+              onConnectionPointMouseDown?.(e, nodeWidth/2, 0);
+            }}
+            onClick={(e) => onConnectionPointClick(e, nodeWidth/2, 0)}
+          />
+          <Circle
+            x={nodeWidth}
+            y={nodeHeight/2}
+            radius={6}
+            fill="#1976d2"
+            onMouseDown={(e) => {
+              e.cancelBubble = true;
+              e.evt.stopPropagation();
+              onConnectionPointMouseDown?.(e, nodeWidth, nodeHeight/2);
+            }}
+            onClick={(e) => onConnectionPointClick(e, nodeWidth, nodeHeight/2)}
+          />
+          <Circle
+            x={nodeWidth/2}
+            y={nodeHeight}
+            radius={6}
+            fill="#1976d2"
+            onMouseDown={(e) => {
+              e.cancelBubble = true;
+              e.evt.stopPropagation();
+              onConnectionPointMouseDown?.(e, nodeWidth/2, nodeHeight);
+            }}
+            onClick={(e) => onConnectionPointClick(e, nodeWidth/2, nodeHeight)}
+          />
+          <Circle
+            x={0}
+            y={nodeHeight/2}
+            radius={6}
+            fill="#1976d2"
+            onMouseDown={(e) => {
+              e.cancelBubble = true;
+              e.evt.stopPropagation();
+              onConnectionPointMouseDown?.(e, 0, nodeHeight/2);
+            }}
+            onClick={(e) => onConnectionPointClick(e, 0, nodeHeight/2)}
+          />
         </Group>
       )}
     </Group>

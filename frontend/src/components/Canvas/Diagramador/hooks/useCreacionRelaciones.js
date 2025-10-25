@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import Konva from 'konva';
 
 /**
@@ -27,6 +27,43 @@ export const useCreacionRelaciones = (agregarRelacion, clases) => {
   const [mostrarModalRelacion, setMostrarModalRelacion] = useState(false);
   const [relacionPendiente, setRelacionPendiente] = useState(null);
 
+  // refs para suavizado
+  const targetPosRef = useRef(null);
+  const currentPosRef = useRef(null);
+  const rafRef = useRef(null);
+  const SMOOTH_FACTOR = 0.18; // menor = más suave
+  const connectionTension = 0.5; // exponer para CanvasStage (Konva.Line tension)
+
+  // iniciar animación de seguimiento suave
+  const startSmoothFollow = useCallback(() => {
+    if (rafRef.current) return;
+
+    const step = () => {
+      if (!currentPosRef.current || !targetPosRef.current) {
+        rafRef.current = requestAnimationFrame(step);
+        return;
+      }
+
+      currentPosRef.current.x += (targetPosRef.current.x - currentPosRef.current.x) * SMOOTH_FACTOR;
+      currentPosRef.current.y += (targetPosRef.current.y - currentPosRef.current.y) * SMOOTH_FACTOR;
+
+      setPuntoFinalTemporal({ x: currentPosRef.current.x, y: currentPosRef.current.y });
+
+      rafRef.current = requestAnimationFrame(step);
+    };
+
+    rafRef.current = requestAnimationFrame(step);
+  }, []);
+
+  const stopSmoothFollow = useCallback(() => {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    targetPosRef.current = null;
+    currentPosRef.current = null;
+  }, []);
+
   /**
    * Inicia la creación de una relación desde una clase específica
    * 
@@ -37,7 +74,12 @@ export const useCreacionRelaciones = (agregarRelacion, clases) => {
   const iniciarConexion = useCallback((idClase, x, y) => {
     setInicioRelacion({ classId: idClase, x, y });
     setCreandoRelacion(true);
-  }, []);
+
+    targetPosRef.current = { x, y };
+    currentPosRef.current = { x, y };
+    setPuntoFinalTemporal({ x, y });
+    startSmoothFollow();
+  }, [startSmoothFollow]);
 
   /**
    * Maneja el click en una clase durante la creación de relación
@@ -53,6 +95,10 @@ export const useCreacionRelaciones = (agregarRelacion, clases) => {
         targetId: idClase 
       });
       setMostrarModalRelacion(true);
+
+      // detener suavizado
+      stopSmoothFollow();
+
       setCreandoRelacion(false);
       setInicioRelacion(null);
       setPuntoFinalTemporal(null);
@@ -60,7 +106,7 @@ export const useCreacionRelaciones = (agregarRelacion, clases) => {
       // Selección normal de clase
       seleccionarClase(idClase);
     }
-  }, [creandoRelacion, inicioRelacion]);
+  }, [creandoRelacion, inicioRelacion, stopSmoothFollow]);
 
   /**
    * Maneja clicks en el stage (área vacía) durante la creación de relación
@@ -76,12 +122,13 @@ export const useCreacionRelaciones = (agregarRelacion, clases) => {
         setCreandoRelacion(false);
         setInicioRelacion(null);
         setPuntoFinalTemporal(null);
+        stopSmoothFollow();
       } else {
         // Deseleccionar elementos
         seleccionarClase(null);
       }
     }
-  }, [creandoRelacion]);
+  }, [creandoRelacion, stopSmoothFollow]);
 
   /**
    * Actualiza el punto final temporal durante el movimiento del mouse
@@ -94,11 +141,23 @@ export const useCreacionRelaciones = (agregarRelacion, clases) => {
       if (stage) {
         const posicionPuntero = stage.getPointerPosition();
         if (posicionPuntero) {
-          setPuntoFinalTemporal({ x: posicionPuntero.x, y: posicionPuntero.y });
+          targetPosRef.current = { x: posicionPuntero.x, y: posicionPuntero.y };
+          if (!rafRef.current) startSmoothFollow();
         }
       }
     }
-  }, [creandoRelacion, inicioRelacion]);
+  }, [creandoRelacion, inicioRelacion, startSmoothFollow]);
+
+  /**
+   * Actualiza el punto final directamente (útil para handles draggables).
+   * Recibe coordenadas absolutas en espacio del stage.
+   */
+  const actualizarPuntoFinal = useCallback((x, y) => {
+    if (!creandoRelacion) return;
+    targetPosRef.current = { x, y };
+    if (!currentPosRef.current) currentPosRef.current = { x, y };
+    if (!rafRef.current) startSmoothFollow();
+  }, [creandoRelacion, startSmoothFollow]);
 
   /**
    * Confirma la creación de una relación desde el modal
@@ -115,7 +174,8 @@ export const useCreacionRelaciones = (agregarRelacion, clases) => {
     }
     setRelacionPendiente(null);
     setMostrarModalRelacion(false);
-  }, [relacionPendiente, agregarRelacion]);
+    stopSmoothFollow();
+  }, [relacionPendiente, agregarRelacion, stopSmoothFollow]);
 
   /**
    * Cancela la relación pendiente y cierra el modal
@@ -123,7 +183,8 @@ export const useCreacionRelaciones = (agregarRelacion, clases) => {
   const cancelarRelacion = useCallback(() => {
     setRelacionPendiente(null);
     setMostrarModalRelacion(false);
-  }, []);
+    stopSmoothFollow();
+  }, [stopSmoothFollow]);
 
   /**
    * Obtiene los nombres de las clases para el modal
@@ -140,6 +201,13 @@ export const useCreacionRelaciones = (agregarRelacion, clases) => {
     };
   }, [relacionPendiente, clases]);
 
+  // cleanup en unmount
+  useEffect(() => {
+    return () => {
+      stopSmoothFollow();
+    };
+  }, [stopSmoothFollow]);
+
   return {
     // Estado
     creandoRelacion,
@@ -147,7 +215,7 @@ export const useCreacionRelaciones = (agregarRelacion, clases) => {
     puntoFinalTemporal,
     mostrarModalRelacion,
     relacionPendiente,
-    
+
     // Funciones
     iniciarConexion,
     manejarClickClase,
@@ -156,8 +224,12 @@ export const useCreacionRelaciones = (agregarRelacion, clases) => {
     confirmarRelacion,
     cancelarRelacion,
     obtenerNombresClases,
-    
-    // Setters para control externo
-    setMostrarModalRelacion
+
+    // extras
+    connectionTension,
+    setMostrarModalRelacion,
+
+    // nuevo: permitir actualizar punto desde un handle draggable
+    actualizarPuntoFinal
   };
 };

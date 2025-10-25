@@ -1,5 +1,5 @@
 import React, { memo } from 'react';
-import { Stage, Layer, Group, Line } from 'react-konva';
+import { Stage, Layer, Group, Line, Circle } from 'react-konva';
 import Konva from 'konva';
 import { UMLClass, UMLRelation, Diagram } from '../../../types/uml';
 import { ClassNode } from '../Clase/ClassNode';
@@ -18,6 +18,7 @@ interface CanvasStageProps {
   isCreatingRelation: boolean;
   relationStart: { classId: string; x: number; y: number } | null;
   tempEndPoint: { x: number; y: number } | null;
+  connectionTension?: number;
 
   onStageClick: (e: Konva.KonvaEventObject<MouseEvent>) => void;
   onStageMouseMove: (e: Konva.KonvaEventObject<MouseEvent>) => void;
@@ -28,6 +29,7 @@ interface CanvasStageProps {
   onNodeDragStart: () => void;
   onNodeDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => void;
   onConnectionStart: (classId: string, x: number, y: number) => void;
+  onHandleDragMove?: (pos: { x: number; y: number }) => void; // <-- nuevo
 }
 
 export const CanvasStage: React.FC<CanvasStageProps> = memo(({
@@ -43,6 +45,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = memo(({
   isCreatingRelation,
   relationStart,
   tempEndPoint,
+  connectionTension = 0.5,
   onStageClick,
   onStageMouseMove,
   onWheel,
@@ -121,14 +124,45 @@ export const CanvasStage: React.FC<CanvasStageProps> = memo(({
           );
         })}
 
-        {/* Temporary relation line while creating */}
+        {/* Temporary relation line while creating (smooth / tension + draggable handle) */}
         {isCreatingRelation && relationStart && tempEndPoint && (
-          <Line
-            points={[relationStart.x, relationStart.y, tempEndPoint.x, tempEndPoint.y]}
-            stroke="#007bff"
-            strokeWidth={2}
-            dash={[5, 5]}
-          />
+          <>
+            <Line
+              points={[relationStart.x, relationStart.y, tempEndPoint.x, tempEndPoint.y]}
+              tension={connectionTension}
+              stroke="#007bff"
+              strokeWidth={3}
+              lineJoin="round"
+              lineCap="round"
+              shadowBlur={2}
+            />
+
+            {/* Draggable handle at the end to allow dragging the endpoint */}
+            <Circle
+              x={tempEndPoint.x}
+              y={tempEndPoint.y}
+              radius={6}
+              fill="#007bff"
+              stroke="#fff"
+              strokeWidth={1}
+              draggable
+              onDragMove={(e) => {
+                // Forward absolute coords to parent via new prop (más fiable que reenviar el evento)
+                const node = e.target;
+                const absX = node.x();
+                const absY = node.y();
+                onHandleDragMove?.({ x: absX, y: absY });
+              }}
+              onDragEnd={(e) => {
+                const node = e.target;
+                const absX = node.x();
+                const absY = node.y();
+                onHandleDragMove?.({ x: absX, y: absY });
+                // trigger click-like finalization (Canvas logic cancels/commits)
+                // convert to a stage click by invoking onStageMouseMove + onStageClick via the parent if needed
+              }}
+            />
+          </>
         )}
 
         {/* Class nodes */}
@@ -136,7 +170,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = memo(({
           <ClassNode
             key={cls.id}
             umlClass={cls}
-            index={idx}                         // <-- pasar índice para fallback de posición
+            index={idx}
             isSelected={selectedClassId === cls.id}
             onSelect={onClassClick}
             onUpdate={(id, updates) => onClassUpdate(id, updates)}
