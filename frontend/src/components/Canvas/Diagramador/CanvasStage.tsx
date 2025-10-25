@@ -54,8 +54,19 @@ export const CanvasStage: React.FC<CanvasStageProps> = memo(({
   onClassUpdate,
   onNodeDragStart,
   onNodeDragEnd,
-  onConnectionStart
+  onConnectionStart,
+  onHandleDragMove // <-- asegúrate que este prop existe en la interfaz
 }) => {
+
+  const pointerToStageCoords = (stage: Konva.Stage | null) => {
+    if (!stage) return null;
+    const pointer = stage.getPointerPosition();
+    if (!pointer) return null;
+    const transform = stage.getAbsoluteTransform().copy();
+    transform.invert();
+    return transform.point(pointer);
+  };
+
   return (
     <Stage
       ref={stageRef}
@@ -66,7 +77,16 @@ export const CanvasStage: React.FC<CanvasStageProps> = memo(({
       x={position.x}
       y={position.y}
       onClick={onStageClick}
-      onMouseMove={onStageMouseMove}
+      onMouseMove={(e) => {
+        // convertir puntero a coords del stage y actualizar punto temporal si estamos creando relación
+        const stage = (stageRef && stageRef.current) || (e.target && e.target.getStage());
+        const pos = pointerToStageCoords(stage);
+        if (isCreatingRelation && pos) {
+          onHandleDragMove?.({ x: pos.x, y: pos.y });
+          return;
+        }
+        onStageMouseMove?.(e);
+      }}
       onWheel={onWheel}
       draggable={draggableStage}
       onDragEnd={(e) => {
@@ -147,19 +167,14 @@ export const CanvasStage: React.FC<CanvasStageProps> = memo(({
               strokeWidth={1}
               draggable
               onDragMove={(e) => {
-                // Forward absolute coords to parent via new prop (más fiable que reenviar el evento)
-                const node = e.target;
-                const absX = node.x();
-                const absY = node.y();
-                onHandleDragMove?.({ x: absX, y: absY });
+                const stage = (stageRef && stageRef.current) || e.target.getStage();
+                const pos = pointerToStageCoords(stage);
+                if (pos) onHandleDragMove?.({ x: pos.x, y: pos.y });
               }}
               onDragEnd={(e) => {
-                const node = e.target;
-                const absX = node.x();
-                const absY = node.y();
-                onHandleDragMove?.({ x: absX, y: absY });
-                // trigger click-like finalization (Canvas logic cancels/commits)
-                // convert to a stage click by invoking onStageMouseMove + onStageClick via the parent if needed
+                const stage = (stageRef && stageRef.current) || e.target.getStage();
+                const pos = pointerToStageCoords(stage);
+                if (pos) onHandleDragMove?.({ x: pos.x, y: pos.y });
               }}
             />
           </>

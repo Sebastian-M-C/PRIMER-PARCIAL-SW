@@ -165,7 +165,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
         connectionTension={connectionTension}
         onStageClick={manejarClickStageCombinado}
         onStageMouseMove={manejarMovimientoMouse}
-        onHandleDragMove={({ x, y }) => actualizarPuntoFinal(x, y)} // <-- nuevo
+        onHandleDragMove={({ x, y }) => actualizarPuntoFinal(x, y)} // <-- importante
         onWheel={manejarRueda}
         onStageDragEnd={manejarFinArrastreStage}
         onClassClick={manejarClickClaseCombinado}
