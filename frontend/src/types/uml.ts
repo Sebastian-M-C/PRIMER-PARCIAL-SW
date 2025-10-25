@@ -56,19 +56,12 @@ export interface UMLDiagramJSON {
   relations: Omit<UMLRelation, 'id'>[];
 }
 
-export interface CollaborationUser {
-  id: string;
-  name: string;
-  color: string;
-  cursor?: {
-    x: number;
-    y: number;
-  };
-}
-
-export interface CollaborationLock {
-  elementId: string;
-  userId: string;
-  timestamp: number;
-}
+/**
+ * Diagram — tipo simplificado usado por el canvas/renderizado:
+ * contenedor con solo clases y relaciones (sin metadatos).
+ */
+export type Diagram = {
+  classes: UMLClass[];
+  relations: UMLRelation[];
+};
 

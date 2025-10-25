@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Canvas } from './components/Canvas/Canvas';
+import { Canvas } from './components/Canvas/Diagramador/Canvas';
 import { Sidebar } from './components/Sidebar/Sidebar';
 import { useDiagramStore } from './store/useDiagramStore';
 import { useSocket } from './hooks/useSocket';
