@@ -1,6 +1,7 @@
 import React from 'react';
 import { Line, Group, Text, Circle } from 'react-konva';
 import { UMLRelation } from '../../types/uml';
+import { PRIMARY_START, PRIMARY_DARK } from '../style/theme';
 
 interface ConnectionLineProps {
   relation: UMLRelation;
@@ -20,13 +21,13 @@ export const ConnectionLine: React.FC<ConnectionLineProps> = ({
   const getLineStyle = (type: string) => {
     switch (type) {
       case 'INHERITANCE':
-        return { stroke: '#000', strokeWidth: 2, dash: [] };
+        return { stroke: PRIMARY_DARK, strokeWidth: isSelected ? 4 : 3, dash: [] };
       case 'COMPOSITION':
-        return { stroke: '#000', strokeWidth: 2, dash: [] };
+        return { stroke: PRIMARY_DARK, strokeWidth: isSelected ? 4 : 3, dash: [] };
       case 'AGGREGATION':
-        return { stroke: '#000', strokeWidth: 2, dash: [5, 5] };
+        return { stroke: PRIMARY_DARK, strokeWidth: isSelected ? 4 : 3, dash: [6, 6] };
       default:
-        return { stroke: isSelected ? '#007bff' : '#666', strokeWidth: isSelected ? 2 : 1, dash: [] };
+        return { stroke: isSelected ? PRIMARY_DARK : PRIMARY_START, strokeWidth: isSelected ? 4 : 3, dash: [] };
     }
   };
 
@@ -45,7 +46,12 @@ export const ConnectionLine: React.FC<ConnectionLineProps> = ({
   ) => {
     const dx = otherX - centerX;
     const dy = otherY - centerY;
-    const ratio = Math.min(width / Math.abs(dx), height / Math.abs(dy)) / 2;
+    // avoid division by zero
+    const absDx = Math.abs(dx) || 1;
+    const absDy = Math.abs(dy) || 1;
+    const rx = (width / 2) / absDx;
+    const ry = (height / 2) / absDy;
+    const ratio = Math.min(rx, ry);
     
     return {
       x: centerX + dx * ratio,
@@ -68,10 +74,15 @@ export const ConnectionLine: React.FC<ConnectionLineProps> = ({
   const midY = (startPoint.y + endPoint.y) / 2;
   
   // Position cardinality labels
-  const sourceLabelX = startPoint.x + (endPoint.x - startPoint.x) * 0.25;
-  const sourceLabelY = startPoint.y + (endPoint.y - startPoint.y) * 0.25;
-  const targetLabelX = startPoint.x + (endPoint.x - startPoint.x) * 0.75;
-  const targetLabelY = startPoint.y + (endPoint.y - startPoint.y) * 0.75;
+  const sourceLabelX = startPoint.x + (endPoint.x - startPoint.x) * 0.22;
+  const sourceLabelY = startPoint.y + (endPoint.y - startPoint.y) * 0.22;
+  const targetLabelX = startPoint.x + (endPoint.x - startPoint.x) * 0.78;
+  const targetLabelY = startPoint.y + (endPoint.y - startPoint.y) * 0.78;
+
+  // Visual sizes (aumentados)
+  const cardinalityRadius = 12; // antes 8
+  const cardinalityFontSize = 13; // antes 10
+  const labelFontSize = 12;
 
   return (
     <Group onClick={onClick}>
@@ -81,15 +92,17 @@ export const ConnectionLine: React.FC<ConnectionLineProps> = ({
         stroke={style.stroke}
         strokeWidth={style.strokeWidth}
         dash={style.dash}
+        lineJoin="round"
+        lineCap="round"
       />
       
       {/* Arrow head for inheritance */}
       {relation.type === 'INHERITANCE' && (
         <Line
           points={[
-            endPoint.x - 10, endPoint.y - 5,
+            endPoint.x - 12, endPoint.y - 6,
             endPoint.x, endPoint.y,
-            endPoint.x - 10, endPoint.y + 5
+            endPoint.x - 12, endPoint.y + 6
           ]}
           stroke={style.stroke}
           strokeWidth={style.strokeWidth}
@@ -102,10 +115,10 @@ export const ConnectionLine: React.FC<ConnectionLineProps> = ({
       {(relation.type === 'COMPOSITION' || relation.type === 'AGGREGATION') && (
         <Line
           points={[
-            endPoint.x - 8, endPoint.y,
-            endPoint.x, endPoint.y - 8,
-            endPoint.x + 8, endPoint.y,
-            endPoint.x, endPoint.y + 8
+            endPoint.x - 10, endPoint.y,
+            endPoint.x, endPoint.y - 10,
+            endPoint.x + 10, endPoint.y,
+            endPoint.x, endPoint.y + 10
           ]}
           stroke={style.stroke}
           strokeWidth={style.strokeWidth}
@@ -114,46 +127,50 @@ export const ConnectionLine: React.FC<ConnectionLineProps> = ({
         />
       )}
       
-      {/* Source cardinality */}
+      {/* Source cardinality (agrandada) */}
       {relation.sourceCardinality && (
         <Group>
           <Circle
             x={sourceLabelX}
             y={sourceLabelY}
-            radius={8}
+            radius={cardinalityRadius}
             fill="white"
             stroke={style.stroke}
-            strokeWidth={1}
+            strokeWidth={1.2}
           />
           <Text
-            text={relation.sourceCardinality}
-            x={sourceLabelX - 4}
-            y={sourceLabelY - 4}
-            fontSize={10}
-            fill="#333"
+            text={String(relation.sourceCardinality)}
+            x={sourceLabelX - cardinalityRadius}
+            y={sourceLabelY - (cardinalityFontSize / 2)}
+            width={cardinalityRadius * 2}
             align="center"
+            fontSize={cardinalityFontSize}
+            fill="#333"
+            listening={false}
           />
         </Group>
       )}
       
-      {/* Target cardinality */}
+      {/* Target cardinality (agrandada) */}
       {relation.targetCardinality && (
         <Group>
           <Circle
             x={targetLabelX}
             y={targetLabelY}
-            radius={8}
+            radius={cardinalityRadius}
             fill="white"
             stroke={style.stroke}
-            strokeWidth={1}
+            strokeWidth={1.2}
           />
           <Text
-            text={relation.targetCardinality}
-            x={targetLabelX - 4}
-            y={targetLabelY - 4}
-            fontSize={10}
-            fill="#333"
+            text={String(relation.targetCardinality)}
+            x={targetLabelX - cardinalityRadius}
+            y={targetLabelY - (cardinalityFontSize / 2)}
+            width={cardinalityRadius * 2}
             align="center"
+            fontSize={cardinalityFontSize}
+            fill="#333"
+            listening={false}
           />
         </Group>
       )}
@@ -163,13 +180,13 @@ export const ConnectionLine: React.FC<ConnectionLineProps> = ({
         <Group>
           <Text
             text={relation.label}
-            x={midX - 20}
-            y={midY - 10}
-            fontSize={11}
+            x={midX - 40}
+            y={midY - (labelFontSize / 2)}
+            fontSize={labelFontSize}
             fill="#333"
-            backgroundColor="white"
-            padding={2}
+            width={80}
             align="center"
+            listening={false}
           />
         </Group>
       )}
