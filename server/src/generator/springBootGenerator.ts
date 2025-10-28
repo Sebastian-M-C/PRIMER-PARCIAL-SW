@@ -36,8 +36,6 @@ export async function generateSpringBootProject(umlData: UMLDiagramJSON): Promis
     // Generate controllers
     await generateControllers(projectDir, basePackage, umlData.classes);
     
-    // Generate mappers
-    await generateMappers(projectDir, basePackage, umlData.classes);
     
     // Generate Postman collection
     await generatePostmanCollection(projectDir, projectName, umlData.classes);
@@ -70,7 +68,6 @@ async function createProjectStructure(projectDir: string, basePackage: string): 
     path.join(srcMainJava, 'service'),
     path.join(srcMainJava, 'service', 'impl'),
     path.join(srcMainJava, 'controller'),
-    path.join(srcMainJava, 'mapper'),
     path.join(srcMainJava, 'config'),
     srcMainResources,
     srcTestJava,
@@ -94,7 +91,7 @@ async function generateMavenFiles(projectDir: string, projectName: string, baseP
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.2.0</version>
+        <version>3.2.5</version>
         <relativePath/>
     </parent>
 
@@ -106,7 +103,10 @@ async function generateMavenFiles(projectDir: string, projectName: string, baseP
 
     <properties>
         <java.version>17</java.version>
-        <mapstruct.version>1.5.5.Final</mapstruct.version>
+        <lombok.version>1.18.30</lombok.version>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
     <dependencies>
@@ -133,17 +133,11 @@ async function generateMavenFiles(projectDir: string, projectName: string, baseP
             <scope>runtime</scope>
         </dependency>
 
-        <!-- MapStruct -->
-        <dependency>
-            <groupId>org.mapstruct</groupId>
-            <artifactId>mapstruct</artifactId>
-            <version>\${mapstruct.version}</version>
-        </dependency>
-
         <!-- Lombok -->
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
+            <version>\${lombok.version}</version>
             <optional>true</optional>
         </dependency>
 
@@ -151,6 +145,13 @@ async function generateMavenFiles(projectDir: string, projectName: string, baseP
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        
+        <!-- H2 Database for testing -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -177,23 +178,27 @@ async function generateMavenFiles(projectDir: string, projectName: string, baseP
                 <configuration>
                     <source>17</source>
                     <target>17</target>
+                    <encoding>UTF-8</encoding>
                     <annotationProcessorPaths>
-                        <path>
-                            <groupId>org.mapstruct</groupId>
-                            <artifactId>mapstruct-processor</artifactId>
-                            <version>\${mapstruct.version}</version>
-                        </path>
                         <path>
                             <groupId>org.projectlombok</groupId>
                             <artifactId>lombok</artifactId>
                             <version>\${lombok.version}</version>
                         </path>
-                        <path>
-                            <groupId>org.projectlombok</groupId>
-                            <artifactId>lombok-mapstruct-binding</artifactId>
-                            <version>0.2.0</version>
-                        </path>
                     </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+            
+            <!-- Maven Surefire Plugin for running tests -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.1.2</version>
+                <configuration>
+                    <includes>
+                        <include>**/*Test.java</include>
+                        <include>**/*Tests.java</include>
+                    </includes>
                 </configuration>
             </plugin>
         </plugins>
@@ -284,6 +289,7 @@ import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.LocalDateTime;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -424,6 +430,7 @@ function generateRequestDTO(basePackage: string, cls: any): string {
 
 import jakarta.validation.constraints.*;
 import lombok.*;
+import java.math.BigDecimal;
 
 @Data
 @NoArgsConstructor
@@ -461,6 +468,7 @@ function generateResponseDTO(basePackage: string, cls: any): string {
 
 import lombok.*;
 import java.time.LocalDateTime;
+import java.math.BigDecimal;
 
 @Data
 @NoArgsConstructor
@@ -543,7 +551,6 @@ public interface ${cls.name}Service {
 import ${basePackage}.dto.${cls.name}Request;
 import ${basePackage}.dto.${cls.name}Response;
 import ${basePackage}.entity.${cls.name};
-import ${basePackage}.mapper.${cls.name}Mapper;
 import ${basePackage}.repository.${cls.name}Repository;
 import ${basePackage}.service.${cls.name}Service;
 import lombok.RequiredArgsConstructor;
@@ -559,13 +566,12 @@ import java.util.stream.Collectors;
 public class ${cls.name}ServiceImpl implements ${cls.name}Service {
     
     private final ${cls.name}Repository ${cls.name.toLowerCase()}Repository;
-    private final ${cls.name}Mapper ${cls.name.toLowerCase()}Mapper;
     
     @Override
     public ${cls.name}Response create(${cls.name}Request request) {
-        ${cls.name} entity = ${cls.name.toLowerCase()}Mapper.toEntity(request);
+        ${cls.name} entity = toEntity(request);
         ${cls.name} saved = ${cls.name.toLowerCase()}Repository.save(entity);
-        return ${cls.name.toLowerCase()}Mapper.toResponse(saved);
+        return toResponse(saved);
     }
     
     @Override
@@ -573,7 +579,7 @@ public class ${cls.name}ServiceImpl implements ${cls.name}Service {
     public ${cls.name}Response findById(Long id) {
         ${cls.name} entity = ${cls.name.toLowerCase()}Repository.findById(id)
             .orElseThrow(() -> new RuntimeException("${cls.name} not found with id: " + id));
-        return ${cls.name.toLowerCase()}Mapper.toResponse(entity);
+        return toResponse(entity);
     }
     
     @Override
@@ -581,7 +587,7 @@ public class ${cls.name}ServiceImpl implements ${cls.name}Service {
     public List<${cls.name}Response> findAll() {
         return ${cls.name.toLowerCase()}Repository.findAll()
             .stream()
-            .map(${cls.name.toLowerCase()}Mapper::toResponse)
+            .map(this::toResponse)
             .collect(Collectors.toList());
     }
     
@@ -590,9 +596,9 @@ public class ${cls.name}ServiceImpl implements ${cls.name}Service {
         ${cls.name} entity = ${cls.name.toLowerCase()}Repository.findById(id)
             .orElseThrow(() -> new RuntimeException("${cls.name} not found with id: " + id));
         
-        ${cls.name.toLowerCase()}Mapper.updateEntity(request, entity);
+        updateEntity(request, entity);
         ${cls.name} updated = ${cls.name.toLowerCase()}Repository.save(entity);
-        return ${cls.name.toLowerCase()}Mapper.toResponse(updated);
+        return toResponse(updated);
     }
     
     @Override
@@ -602,7 +608,19 @@ public class ${cls.name}ServiceImpl implements ${cls.name}Service {
         }
         ${cls.name.toLowerCase()}Repository.deleteById(id);
     }
-}`;
+    
+    private ${cls.name} toEntity(${cls.name}Request request) {
+        return ${cls.name}.builder()${generateBuilderFieldsForEntity(cls)}
+                .build();
+    }
+    
+    private ${cls.name}Response toResponse(${cls.name} entity) {
+        return ${cls.name}Response.builder()${generateBuilderFieldsForResponse(cls)}
+                .build();
+    }
+    
+    private void updateEntity(${cls.name}Request request, ${cls.name} entity) {${generateUpdateFieldsForEntity(cls)}
+    }`;
 
     await fs.promises.writeFile(
       path.join(implPackagePath, `${cls.name}ServiceImpl.java`),
@@ -674,35 +692,6 @@ public class ${cls.name}Controller {
   }
 }
 
-async function generateMappers(projectDir: string, basePackage: string, classes: any[]): Promise<void> {
-  const packagePath = path.join(projectDir, 'src', 'main', 'java', basePackage.replace(/\./g, '/'), 'mapper');
-  
-  for (const cls of classes) {
-    const mapperContent = `package ${basePackage}.mapper;
-
-import ${basePackage}.dto.${cls.name}Request;
-import ${basePackage}.dto.${cls.name}Response;
-import ${basePackage}.entity.${cls.name};
-import org.mapstruct.Mapper;
-import org.mapstruct.MappingTarget;
-import org.mapstruct.NullValuePropertyMappingStrategy;
-
-@Mapper(componentModel = "spring", nullValuePropertyMappingStrategy = NullValuePropertyMappingStrategy.IGNORE)
-public interface ${cls.name}Mapper {
-    
-    ${cls.name} toEntity(${cls.name}Request request);
-    
-    ${cls.name}Response toResponse(${cls.name} entity);
-    
-    void updateEntity(${cls.name}Request request, @MappingTarget ${cls.name} entity);
-}`;
-
-    await fs.promises.writeFile(
-      path.join(packagePath, `${cls.name}Mapper.java`),
-      mapperContent
-    );
-  }
-}
 
 async function generatePostmanCollection(projectDir: string, projectName: string, classes: any[]): Promise<void> {
   const collection: any = {
@@ -903,6 +892,42 @@ function mapTypeToJava(type: string): string {
   // Handle unknown types - default to String to avoid compilation errors
   console.warn(`Unknown type "${type}" mapped to String`);
   return 'String';
+}
+
+function generateBuilderFieldsForEntity(cls: any): string {
+  let fields = '';
+  
+  for (const attr of cls.attributes || []) {
+    if (attr.isId) continue; // Skip ID for entity creation
+    
+    fields += `\n                .${attr.name}(request.get${attr.name.charAt(0).toUpperCase() + attr.name.slice(1)}())`;
+  }
+  
+  return fields;
+}
+
+function generateBuilderFieldsForResponse(cls: any): string {
+  let fields = '';
+  
+  for (const attr of cls.attributes || []) {
+    fields += `\n                .${attr.name}(entity.get${attr.name.charAt(0).toUpperCase() + attr.name.slice(1)}())`;
+  }
+  
+  return fields;
+}
+
+function generateUpdateFieldsForEntity(cls: any): string {
+  let fields = '';
+  
+  for (const attr of cls.attributes || []) {
+    if (attr.isId) continue;
+    
+    fields += `\n        if (request.get${attr.name.charAt(0).toUpperCase() + attr.name.slice(1)}() != null) {
+            entity.set${attr.name.charAt(0).toUpperCase() + attr.name.slice(1)}(request.get${attr.name.charAt(0).toUpperCase() + attr.name.slice(1)}());
+        }`;
+  }
+  
+  return fields;
 }
 
 async function createZipFile(projectDir: string, projectName: string): Promise<Buffer> {
