@@ -19,7 +19,9 @@ export const Sidebar: React.FC = () => {
     addClass,
     deleteClass,
     updateRelation,
-    deleteRelation
+    deleteRelation,
+    generateDiagramFromAI,
+    applyUMLActions
   } = useDiagramStore();
 
   const selectedClass = selectedClassId ? getClassById(selectedClassId) : null;
@@ -383,13 +385,13 @@ export const Sidebar: React.FC = () => {
   };
 
   const handleAIGenerate = async () => {
-    const text = prompt('Describe the class you want to create:');
+    const text = prompt('Describe the complete diagram you want to create (e.g., "Crea una clase Usuario con id y nombre, y una clase Articulo con titulo. Un usuario puede tener muchos artículos"):');
     if (!text) return;
     
     try {
       setIsGenerating(true);
       
-      const response = await fetch(`${SERVER_URL}/api/ai/from-text`, {
+      const response = await fetch(`${SERVER_URL}/api/ai/generate-diagram`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -399,34 +401,86 @@ export const Sidebar: React.FC = () => {
       
       if (response.ok) {
         const result = await response.json();
-        console.log('AI Generated Class:', result);
+        console.log('AI Generated Diagram:', result);
         
-        // Add generated class to diagram
-        if (result.name && result.attributes) {
-          const newClass = {
-            id: `class-${Date.now()}`,
-            name: result.name,
-            attributes: result.attributes || [],
-            methods: result.methods || [],
-            position: { 
-              x: Math.random() * 400 + 100, 
-              y: Math.random() * 300 + 100 
-            },
-            width: 200,
-            height: 100
-          };
+        // Add generated diagram to canvas
+        if (result.classes && result.classes.length > 0) {
+          generateDiagramFromAI(result.classes, result.relations || []);
           
-          addClass(newClass);
-          alert(`Class "${result.name}" has been generated and added to the diagram!`);
+          const classNames = result.classes.map((cls: any) => cls.name).join(', ');
+          const relationCount = result.relations ? result.relations.length : 0;
+          
+          alert(`Diagram generated successfully!\nClasses: ${classNames}\nRelations: ${relationCount}`);
         } else {
-          alert('Failed to generate class. Please try a different description.');
+          alert('Failed to generate diagram. Please try a different description.');
         }
       } else {
-        alert('Failed to generate class. Please try again.');
+        const errorData = await response.json();
+        alert(`Failed to generate diagram: ${errorData.error || 'Unknown error'}`);
       }
     } catch (error) {
-      console.error('Error generating from text:', error);
-      alert('Error generating class. Please check your connection.');
+      console.error('Error generating diagram from text:', error);
+      alert('Error generating diagram. Please check your connection.');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleAIModify = async () => {
+    if (!diagram) {
+      alert('No hay diagrama para modificar.');
+      return;
+    }
+    const text = prompt('Describe la modificación que quieres realizar (ej: "añade un email a la clase Usuario"):');
+    if (!text) return;
+    try {
+      setIsGenerating(true);
+      // Simplificar diagrama enviado a la IA (usar nombres)
+      const diagramPayload = {
+        package: diagram.package,
+        classes: diagram.classes.map(cls => ({
+          name: cls.name,
+          attributes: cls.attributes,
+          methods: cls.methods
+        })),
+        relations: diagram.relations.map(rel => {
+          const sourceName = diagram.classes.find(c => c.id === rel.source)?.name || rel.source;
+          const targetName = diagram.classes.find(c => c.id === rel.target)?.name || rel.target;
+          return {
+            id: rel.id,
+            type: rel.type,
+            source: sourceName,
+            target: targetName,
+            sourceCardinality: rel.sourceCardinality,
+            targetCardinality: rel.targetCardinality,
+            mappedBy: rel.mappedBy,
+            label: rel.label
+          };
+        })
+      };
+
+      const response = await fetch(`${SERVER_URL}/api/ai/modify-diagram`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, diagram: diagramPayload })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        alert(`Fallo la modificación: ${errorData.error || 'Unknown error'}`);
+        return;
+      }
+
+      const result = await response.json();
+      if (Array.isArray(result.actions) && result.actions.length > 0) {
+        applyUMLActions(result.actions);
+        alert(`Se aplicaron ${result.actions.length} acción(es) al diagrama.`);
+      } else {
+        alert('No hay acciones para aplicar.');
+      }
+    } catch (error) {
+      console.error('Error modifying diagram:', error);
+      alert('Error modificando el diagrama.');
     } finally {
       setIsGenerating(false);
     }
@@ -613,6 +667,28 @@ export const Sidebar: React.FC = () => {
           >
             <Type size={14} />
             {isGenerating ? 'Cargando...' : 'IA Generar'}
+          </button>
+          
+          <button
+            onClick={handleAIModify}
+            disabled={isGenerating}
+            style={{
+              flex: 1,
+              padding: '6px 8px',
+              backgroundColor: isGenerating ? '#6c757d' : '#20c997',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: isGenerating ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '4px',
+              fontSize: '12px'
+            }}
+          >
+            <Sparkles size={14} />
+            {isGenerating ? 'Cargando...' : 'IA Modificar'}
           </button>
         </div>
       </div>

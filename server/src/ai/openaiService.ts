@@ -23,6 +23,110 @@ const openai = new OpenAI({
 
 console.log('✅ OpenAI client initialized successfully');
 
+// Prompt de sistema para generación de diagramas completos
+const DIAGRAM_SYSTEM_PROMPT = `Eres un experto en diseño UML y arquitectura de software. Tu tarea es convertir descripciones en lenguaje natural a diagramas UML completos con múltiples clases y sus relaciones.
+
+INSTRUCCIONES CRÍTICAS:
+- Responde ÚNICAMENTE en español
+- Analiza la descripción del usuario y extrae todas las clases mencionadas
+- Identifica las relaciones entre las clases (uno a uno, uno a muchos, muchos a muchos)
+- Genera atributos apropiados para cada clase basándote en el contexto
+- Incluye métodos comunes (guardar, buscar, eliminar) para cada clase
+- Usa tipos Java apropiados (String, Long, Integer, Boolean, LocalDateTime, BigDecimal)
+- Nombres en camelCase para atributos y métodos, PascalCase para clases
+- Siempre incluye un campo 'id' como clave primaria en cada clase
+- Para relaciones, genera IDs únicos y etiquetas descriptivas
+
+FORMATO DE RESPUESTA:
+Debes responder ÚNICAMENTE con un objeto JSON válido que siga exactamente esta estructura:
+{
+  "classes": [
+    {
+      "name": "NombreClase",
+      "attributes": [
+        {
+          "name": "nombreAtributo",
+          "type": "String|Long|Integer|Boolean|LocalDateTime|BigDecimal",
+          "nullable": false,
+          "unique": false,
+          "isId": false
+        }
+      ],
+      "methods": [
+        {
+          "name": "nombreMetodo",
+          "returnType": "String|void|NombreClase",
+          "parameters": [
+            {
+              "name": "nombreParametro",
+              "type": "String"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "relations": [
+    {
+      "id": "relacion_1",
+      "source": "ClaseOrigen",
+      "target": "ClaseDestino",
+      "type": "ONE_TO_ONE|ONE_TO_MANY|MANY_TO_ONE|MANY_TO_MANY",
+      "sourceLabel": "etiqueta origen",
+      "targetLabel": "etiqueta destino",
+      "mappedBy": "campoMapeado",
+      "joinColumn": "columna_union"
+    }
+  ]
+}
+
+NO incluyas texto adicional, explicaciones o comentarios. Solo el JSON válido.`;
+
+// Prompt de sistema para MODIFICAR un diagrama existente (contexto-aware)
+const MODIFY_SYSTEM_PROMPT = `Eres un experto en diseño UML y arquitectura de software.
+Tu tarea es LEER el diagrama UML actual y la instrucción del usuario, y devolver una lista de ACCIONES
+para crear, actualizar, renombrar o eliminar elementos existentes sin duplicarlos innecesariamente.
+
+REQUISITOS CLAVE:
+- Responde ÚNICAMENTE en español.
+- Si la clase/relación ya existe, MODIFICA en lugar de crear duplicados.
+- Mantén convenciones: PascalCase para clases, camelCase para atributos/métodos.
+- Campos comunes: agregar id (Long, isId: true) si corresponde; respetar tipos Java (String, Long, Integer, Boolean, LocalDateTime, BigDecimal).
+- Para relaciones, respeta ONE_TO_ONE, ONE_TO_MANY, MANY_TO_ONE, MANY_TO_MANY.
+- Todas las salidas deben ser ACCIONES discretas.
+
+FORMATO DE RESPUESTA (JSON válido):
+{
+  "actions": [
+    {
+      "type": "CREATE_CLASS|UPDATE_CLASS|DELETE_CLASS|RENAME_CLASS|ADD_ATTRIBUTE|UPDATE_ATTRIBUTE|DELETE_ATTRIBUTE|ADD_METHOD|UPDATE_METHOD|DELETE_METHOD|CREATE_RELATION|UPDATE_RELATION|DELETE_RELATION",
+      "target": {
+        "className": "NombreClase",
+        "newClassName": "NuevoNombreClase",
+        "relationId": "relacion_1",
+        "sourceClassName": "ClaseOrigen",
+        "targetClassName": "ClaseDestino",
+        "attributeName": "nombreAtributo",
+        "newAttributeName": "nuevoNombreAtributo",
+        "methodName": "nombreMetodo",
+        "newMethodName": "nuevoNombreMetodo"
+      },
+      "payload": { "objeto": "completo con los campos actualizados o a crear" },
+      "reason": "Explicación breve de por qué se toma esta acción"
+    }
+  ]
+}
+
+INSTRUCCIONES DE DECISIÓN:
+- Si el usuario dice "añade atributo X a la clase Y" y la clase Y existe, devuelve ADD_ATTRIBUTE.
+- Si el atributo existe, usa UPDATE_ATTRIBUTE.
+- Si se pide renombrar, usa RENAME_CLASS/UPDATE_ATTRIBUTE con newAttributeName/UPDATE_METHOD con newMethodName.
+- Si se pide eliminar, usa la acción DELETE_* correspondiente.
+- Si se pide una nueva relación entre clases existentes, usa CREATE_RELATION.
+- Si las clases no existen y es necesario, crea primero con CREATE_CLASS y luego la relación.
+
+NO incluyas texto adicional ni comentarios fuera del JSON.`;
+
 export interface AISuggestion {
   type: 'attribute' | 'method' | 'relation' | 'normalization' | 'naming';
   title: string;
@@ -51,6 +155,75 @@ export interface GeneratedUMLClass {
     mappedBy?: string;
     joinColumn?: string;
   }>;
+}
+
+export interface UMLDiagramResponse {
+  classes: Array<{
+    name: string;
+    attributes: Array<{
+      name: string;
+      type: string;
+      nullable?: boolean;
+      unique?: boolean;
+      isId?: boolean;
+    }>;
+    methods: Array<{
+      name: string;
+      returnType: string;
+      parameters: Array<{ name: string; type: string }>;
+    }>;
+  }>;
+  relations: Array<{
+    id: string;
+    source: string;
+    target: string;
+    type: 'ONE_TO_ONE' | 'ONE_TO_MANY' | 'MANY_TO_ONE' | 'MANY_TO_MANY';
+    sourceLabel?: string;
+    targetLabel?: string;
+    mappedBy?: string;
+    joinColumn?: string;
+  }>;
+}
+
+// Acciones para modificar un diagrama existente de forma consciente del contexto
+export type UMLActionType =
+  | 'CREATE_CLASS'
+  | 'UPDATE_CLASS'
+  | 'DELETE_CLASS'
+  | 'RENAME_CLASS'
+  | 'ADD_ATTRIBUTE'
+  | 'UPDATE_ATTRIBUTE'
+  | 'DELETE_ATTRIBUTE'
+  | 'ADD_METHOD'
+  | 'UPDATE_METHOD'
+  | 'DELETE_METHOD'
+  | 'CREATE_RELATION'
+  | 'UPDATE_RELATION'
+  | 'DELETE_RELATION';
+
+export interface UMLActionTarget {
+  className?: string;
+  newClassName?: string; // para RENAME_CLASS
+  relationId?: string;
+  sourceClassName?: string;
+  targetClassName?: string;
+  attributeName?: string;
+  newAttributeName?: string; // para renombrar atributo
+  methodName?: string;
+  newMethodName?: string; // para renombrar método
+}
+
+export interface UMLAction {
+  type: UMLActionType;
+  target?: UMLActionTarget;
+  // payload contendrá el objeto completo que se debe crear/actualizar
+  payload?: any;
+  // razón opcional para trazabilidad
+  reason?: string;
+}
+
+export interface UMLActionResponse {
+  actions: UMLAction[];
 }
 
 export async function getAISuggestions(umlData: any): Promise<AISuggestion[]> {
@@ -198,6 +371,86 @@ Pautas:
   }
 }
 
+export async function generateDiagramFromText(text: string): Promise<UMLDiagramResponse> {
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages: [
+        {
+          role: "system",
+          content: DIAGRAM_SYSTEM_PROMPT
+        },
+        {
+          role: "user",
+          content: text
+        }
+      ],
+      temperature: 0.7,
+      max_tokens: 3000,
+      response_format: { type: "json_object" }
+    });
+
+    const response = completion.choices[0]?.message?.content;
+    if (!response) {
+      throw new Error('No response from OpenAI');
+    }
+
+    const parsedResponse = JSON.parse(response);
+    
+    // Validar que la respuesta tenga la estructura esperada
+    if (!parsedResponse.classes || !Array.isArray(parsedResponse.classes)) {
+      throw new Error('Invalid response structure: missing classes array');
+    }
+    
+    if (!parsedResponse.relations || !Array.isArray(parsedResponse.relations)) {
+      parsedResponse.relations = [];
+    }
+
+    return parsedResponse as UMLDiagramResponse;
+  } catch (error) {
+    console.error('Error generating diagram from text:', error);
+    return getMockDiagramResponse(text);
+  }
+}
+
+export async function modifyDiagramFromText(currentDiagram: any, text: string): Promise<UMLActionResponse> {
+  try {
+    const userPrompt = `DIAGRAMA ACTUAL (JSON):\n${JSON.stringify(currentDiagram, null, 2)}\n\nINSTRUCCIÓN DEL USUARIO:\n${text}`;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages: [
+        {
+          role: "system",
+          content: MODIFY_SYSTEM_PROMPT
+        },
+        {
+          role: "user",
+          content: userPrompt
+        }
+      ],
+      temperature: 0.4,
+      max_tokens: 2000,
+      response_format: { type: "json_object" }
+    });
+
+    const response = completion.choices[0]?.message?.content;
+    if (!response) {
+      throw new Error('No response from OpenAI');
+    }
+
+    const parsed = JSON.parse(response);
+    if (!parsed.actions || !Array.isArray(parsed.actions)) {
+      throw new Error('Invalid response structure: missing actions array');
+    }
+
+    return parsed as UMLActionResponse;
+  } catch (error) {
+    console.error('Error modifying diagram from text:', error);
+    return getMockModificationActions(currentDiagram, text);
+  }
+}
+
 function getMockSuggestions(umlData: any): AISuggestion[] {
   const suggestions: AISuggestion[] = [];
 
@@ -279,5 +532,87 @@ function getMockGeneratedClass(text: string): GeneratedUMLClass {
     ],
     relations: []
   };
+}
+
+function getMockDiagramResponse(text: string): UMLDiagramResponse {
+  // Mock implementation para diagramas completos
+  const words = text.toLowerCase().split(' ');
+  
+  // Detectar clases mencionadas en el texto
+  const classKeywords = ['usuario', 'user', 'articulo', 'article', 'producto', 'product', 'cliente', 'client', 'pedido', 'order'];
+  const detectedClasses = classKeywords.filter(keyword => 
+    words.some(word => word.includes(keyword))
+  );
+  
+  // Si no se detectan clases específicas, usar clases por defecto
+  const classes = detectedClasses.length > 0 ? detectedClasses : ['Usuario', 'Articulo'];
+  
+  const mockClasses = classes.map((className, index) => ({
+    name: className.charAt(0).toUpperCase() + className.slice(1),
+    attributes: [
+      { name: 'id', type: 'Long', isId: true },
+      { name: 'nombre', type: 'String', nullable: false },
+      { name: 'createdAt', type: 'LocalDateTime', nullable: false },
+      { name: 'updatedAt', type: 'LocalDateTime', nullable: false }
+    ],
+    methods: [
+      { name: 'guardar', returnType: 'void', parameters: [] },
+      { name: 'buscarPorId', returnType: className.charAt(0).toUpperCase() + className.slice(1), parameters: [{ name: 'id', type: 'Long' }] },
+      { name: 'eliminar', returnType: 'void', parameters: [] }
+    ]
+  }));
+  
+  // Generar relaciones si hay múltiples clases
+  const mockRelations = classes.length > 1 ? [
+    {
+      id: 'relacion_1',
+      source: classes[0].charAt(0).toUpperCase() + classes[0].slice(1),
+      target: classes[1].charAt(0).toUpperCase() + classes[1].slice(1),
+      type: 'ONE_TO_MANY' as const,
+      sourceLabel: 'tiene',
+      targetLabel: 'pertenece',
+      mappedBy: 'usuario',
+      joinColumn: 'usuario_id'
+    }
+  ] : [];
+  
+  return {
+    classes: mockClasses,
+    relations: mockRelations
+  };
+}
+
+function getMockModificationActions(currentDiagram: any, text: string): UMLActionResponse {
+  const actions: UMLAction[] = [];
+  const lower = (text || '').toLowerCase();
+
+  // Heurística simple: "añade/agrega/agregar" + atributo a la clase X
+  const addAttrMatch = lower.match(/(añade|agrega|agregar|add)\s+(\w+)\s+a\s+la\s+clase\s+(\w+)/);
+  if (addAttrMatch) {
+    const [, , attribute, classNameRaw] = addAttrMatch;
+    const className = classNameRaw.charAt(0).toUpperCase() + classNameRaw.slice(1);
+    const exists = currentDiagram?.classes?.some((c: any) => c.name === className);
+    if (exists) {
+      actions.push({
+        type: 'ADD_ATTRIBUTE',
+        target: { className },
+        payload: { name: attribute, type: 'String', nullable: false }
+      });
+      return { actions };
+    }
+  }
+
+  // Heurística: renombrar clase "Usuario" a "Cliente"
+  const renameMatch = lower.match(/renombra(r)?\s+la\s+clase\s+(\w+)\s+a\s+(\w+)/);
+  if (renameMatch) {
+    const [, , fromRaw, toRaw] = renameMatch;
+    const from = fromRaw.charAt(0).toUpperCase() + fromRaw.slice(1);
+    const to = toRaw.charAt(0).toUpperCase() + toRaw.slice(1);
+    actions.push({ type: 'RENAME_CLASS', target: { className: from, newClassName: to } });
+    return { actions };
+  }
+
+  // Por defecto no hacer nada
+  return { actions };
 }
 
