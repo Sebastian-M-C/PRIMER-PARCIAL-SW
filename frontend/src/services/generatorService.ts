@@ -1,5 +1,7 @@
 import { UMLDiagramJSON } from '../types/uml';
 
+const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3001';
+
 /**
  * Envía el diagrama al backend (/api/generator/flutter) y fuerza la descarga
  * del ZIP resultante en el navegador.
@@ -10,7 +12,7 @@ import { UMLDiagramJSON } from '../types/uml';
 export async function downloadFlutterZip(diagram: UMLDiagramJSON, filename?: string): Promise<void> {
   console.log('[generatorService] Enviando diagrama al generador (POST /api/generator/flutter)', diagram);
 
-  const res = await fetch('/api/generator/flutter', {
+  const res = await fetch(`${SERVER_URL}/api/generator/flutter`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -32,6 +34,11 @@ export async function downloadFlutterZip(diagram: UMLDiagramJSON, filename?: str
   const blob = await res.blob();
   console.log('[generatorService] Blob recibido. size:', blob.size, 'type:', blob.type);
 
+  // Validar que el blob no esté vacío
+  if (blob.size === 0) {
+    throw new Error('El servidor retornó un archivo vacío');
+  }
+
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -49,7 +56,7 @@ export async function downloadFlutterZip(diagram: UMLDiagramJSON, filename?: str
  */
 export async function getFlutterZipBlob(diagram: UMLDiagramJSON): Promise<Blob> {
   console.log('[generatorService] Solicitando blob del generador...');
-  const res = await fetch('/api/generator/flutter', {
+  const res = await fetch(`${SERVER_URL}/api/generator/flutter`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Accept': 'application/zip' },
     body: JSON.stringify(diagram)
@@ -64,5 +71,49 @@ export async function getFlutterZipBlob(diagram: UMLDiagramJSON): Promise<Blob> 
 
   const blob = await res.blob();
   console.log('[generatorService] Blob size:', blob.size, 'type:', blob.type);
+  
+  if (blob.size === 0) {
+    throw new Error('El servidor retornó un archivo vacío');
+  }
+  
   return blob;
+}
+
+/**
+ * ✅ NUEVO: Generar proyecto Spring Boot
+ */
+export async function downloadSpringBootZip(diagram: UMLDiagramJSON, filename?: string): Promise<void> {
+  console.log('[generatorService] Generando Spring Boot project...');
+
+  const res = await fetch(`${SERVER_URL}/api/generator/spring`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/zip'
+    },
+    body: JSON.stringify(diagram)
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    console.error('[generatorService] Error en generación Spring Boot:', res.status, text);
+    throw new Error(`Error generating Spring Boot: ${res.status} ${text}`);
+  }
+
+  const blob = await res.blob();
+  
+  if (blob.size === 0) {
+    throw new Error('El servidor retornó un archivo vacío');
+  }
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename ?? `${diagram.package ?? 'spring-project'}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+
+  console.log('[generatorService] Spring Boot descargado:', a.download);
 }

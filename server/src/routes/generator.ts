@@ -2,10 +2,13 @@ import { Router } from 'express';
 import { generateSpringBootProject } from '../generator/springBootGenerator';
 import { generateFlutterFromDiagram } from '../generator_flutter/flutterGenerator';
 import path from 'path';
-import fs from 'fs';
 
 const router = Router();
 
+/**
+ * POST /api/generator/spring
+ * Genera proyecto Spring Boot desde diagrama UML
+ */
 router.post('/spring', async (req, res) => {
   try {
     const umlData = req.body;
@@ -16,7 +19,7 @@ router.post('/spring', async (req, res) => {
       });
     }
 
-    console.log('Generating Spring Boot project for:', umlData.package);
+    console.log('[Spring Generator] Generando proyecto para:', umlData.package);
     
     const zipBuffer = await generateSpringBootProject(umlData);
     
@@ -25,7 +28,7 @@ router.post('/spring', async (req, res) => {
     return res.send(zipBuffer);
     
   } catch (error) {
-    console.error('Error generating Spring Boot project:', error);
+    console.error('[Spring Generator] Error:', error);
     return res.status(500).json({ 
       error: 'Failed to generate Spring Boot project',
       message: error instanceof Error ? error.message : 'Unknown error'
@@ -33,33 +36,72 @@ router.post('/spring', async (req, res) => {
   }
 });
 
-
 /**
  * POST /api/generator/flutter
+ * Genera aplicación Flutter desde diagrama UML
  * Body: UMLDiagramJSON
  * Response: application/zip (attachment)
  */
 router.post('/flutter', async (req, res) => {
   try {
     const diagram = req.body;
+    
+    // Validar entrada
     if (!diagram || !Array.isArray(diagram.classes)) {
-      return res.status(400).json({ error: 'Diagrama inválido' });
+      return res.status(400).json({ 
+        error: 'Invalid diagram format. Required: { classes: [...] }' 
+      });
     }
-    const zipPath = await generateFlutterFromDiagram(diagram);
-    // Asegurar que la ruta always retorna: añadimos return aquí
+
+    if (diagram.classes.length === 0) {
+      return res.status(400).json({ 
+        error: 'Diagram must contain at least one class' 
+      });
+    }
+
+    console.log('[Flutter Generator] Generando app para:', diagram.name || 'Sin nombre');
+    console.log(`[Flutter Generator] Clases: ${diagram.classes.length}, Relaciones: ${diagram.relations?.length || 0}`);
+
+    // Generar proyecto
+    const zipPath = await generateFlutterFromDiagram(diagram, {
+      apiBaseUrl: process.env.API_BASE_URL || 'http://localhost:3000',
+      enableWeb: true,
+      enableWindows: true
+    });
+
+    // Verificar que el archivo existe
+    const fs = require('fs').promises;
+    try {
+      await fs.access(zipPath);
+    } catch {
+      throw new Error(`ZIP file not found: ${zipPath}`);
+    }
+
+    console.log('[Flutter Generator] ✅ Enviando ZIP al cliente...');
+
+    // Enviar archivo
     return res.download(zipPath, path.basename(zipPath), (err) => {
       if (err) {
-        console.error('Error sending zip:', err);
-        // Si hay error al enviar, intentar responder con 500 si no se ha enviado nada
-        try {
-          if (!res.headersSent) res.status(500).json({ error: 'Error enviando ZIP' });
-        } catch (e) { /* ignore */ }
+        console.error('[Flutter Generator] Error al enviar ZIP:', err);
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Error sending file' });
+        }
+      } else {
+        console.log('[Flutter Generator] ✅ ZIP enviado exitosamente');
+        
+        // Limpiar archivo temporal después de enviarlo
+        fs.unlink(zipPath).catch((unlinkErr: any) => {
+          console.error('[Flutter Generator] Error al eliminar temporal:', unlinkErr);
+        });
       }
-      // opcional: limpieza de ficheros temporales aquí
     });
+
   } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: 'Error generando app Flutter' });
+    console.error('[Flutter Generator] ❌ Error:', err);
+    return res.status(500).json({ 
+      error: 'Error generando app Flutter',
+      message: err instanceof Error ? err.message : 'Unknown error'
+    });
   }
 });
 

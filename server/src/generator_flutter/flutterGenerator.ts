@@ -1,350 +1,474 @@
-// Generador mínimo de proyecto Flutter a partir de un UMLDiagramJSON.
-// Produce un proyecto runnable (sin codegen) empaquetado en ZIP.
-
-/**
- * Objetivo:
- * - Leer un UMLDiagramJSON (clases con atributos).
- * - Generar archivos Dart básicos (modelos, pantallas, main).
- * - Empaquetar el proyecto generado en generated/<uuid>.zip y devolver la ruta.
- *
- * Notas:
- * - Este generador prioriza simplicidad para que la app sea ejecutable inmediatamente.
- * - Relaciones complejas y codegen (freezed/json_serializable) se omiten por simplicidad.
- */
-
-import fs from 'fs';
-import path from 'path';
+import * as fs from 'fs';
+import * as path from 'path';
 import { promisify } from 'util';
 import archiver from 'archiver';
 import { v4 as uuidv4 } from 'uuid';
+
+// Generadores
+import { generateModelDart, UMLClass, UMLAttribute } from './generators/modelGenerator';
+import { generateServiceDart } from './generators/serviceGenerator';
+import { generateListPageDart, generateFormPageDart } from './generators/pageGenerator';
+import { generateSidebarDart } from './generators/sidebarGenerator';
+import { generateRoutesDart } from './generators/routeGenerator';
+import { generateHomePageDart } from './generators/widgetGenerator';
+
+// Templates
+import { generatePubspecYaml } from './templates/pubspecTemplate';
+import { generateMainDart } from './templates/mainTemplate';
+
+// Utils
+import { getRelationsForClass, ProcessedRelation } from './utils/relationMapper';
 import { enableFlutterPlatforms } from './enablePlatforms';
 
 const mkdir = promisify(fs.mkdir);
 const writeFile = promisify(fs.writeFile);
 const stat = promisify(fs.stat);
 
-// Tipos internos simplificados para el generador
-type UMLAttr = { name: string; type: string; nullable?: boolean };
-type UMLClass = { name: string; attributes: UMLAttr[] };
-type UMLDiagramJSON = { package?: string; classes: Array<Omit<UMLClass, 'id'>>; relations?: any[] };
-
 /**
- * mapUmlTypeToDart
- * - Mapea tipos UML / Java comunes a tipos Dart básicos para generar modelos simples.
- * - Si no reconoce el tipo, intenta inferir un nombre de modelo o usa String por defecto.
+ * Tipos para el diagrama UML de entrada
  */
-function mapUmlTypeToDart(t: string): string {
-  const s = (t || '').toLowerCase();
-  if (['string', 'char', 'varchar', 'text'].includes(s)) return 'String';
-  if (['long', 'integer', 'int', 'short'].includes(s)) return 'int';
-  if (['bigdecimal', 'decimal', 'double', 'float'].includes(s)) return 'double';
-  if (['localdatetime', 'datetime', 'date', 'timestamp'].includes(s)) return 'DateTime';
-  if (['boolean', 'bool'].includes(s)) return 'bool';
-  // Si el tipo empieza por mayúscula, se asume que es un modelo personalizado (ej. Address).
-  // En caso contrario, devolvemos String como fallback.
-  return /^[A-Z]/.test(t) ? t : 'String';
+export interface UMLDiagramJSON {
+  package?: string;
+  name?: string;
+  classes: Array<{
+    id?: string;
+    name: string;
+    attributes: UMLAttribute[];
+    methods?: Array<{
+      name: string;
+      returnType: string;
+      parameters?: any[];
+    }>;
+  }>;
+  relations?: Array<{
+    id?: string;
+    type: string;
+    source: string;
+    target: string;
+    sourceCardinality?: string;
+    targetCardinality?: string;
+    mappedBy?: string;
+    joinColumn?: string;
+    label?: string;
+  }>;
 }
 
 /**
- * generateModelDart
- * - Genera una clase Dart simple con:
- *   - campos finales
- *   - constructor con parámetros (required cuando no nullable)
- *   - factory fromJson(Map) para parsear desde JSON
- *   - toJson() para serializar
- *
- * Limitaciones:
- * - No genera validaciones ni codegen (freezed).
- * - DateTime se parsea desde string ISO si existe.
+ * Opciones de configuración para la generación
  */
-function generateModelDart(cls: UMLClass): string {
-  const className = cls.name;
-
-  // Campos: final <type> <name>;
-  const fields = cls.attributes.map(a => {
-    const dartType = mapUmlTypeToDart(a.type);
-    const nullSuffix = a.nullable ? '?' : '';
-    return `  final ${dartType}${nullSuffix} ${a.name};`;
-  }).join('\n');
-
-  // Constructor: required o no según nullable
-  const ctorParams = cls.attributes.map(a => {
-    const isRequired = a.nullable ? '' : 'required ';
-    return `    ${isRequired}this.${a.name},`;
-  }).join('\n');
-
-  // fromJson: mapea campos con casting seguro y fallbacks para evitar null runtime errors
-  const fromJsonBody = cls.attributes.map(a => {
-    const dartType = mapUmlTypeToDart(a.type);
-    const name = a.name;
-    const nullable = a.nullable ? true : false;
-
-    if (dartType === 'int') {
-      const fallback = nullable ? 'null' : '0';
-      return `      ${name}: json['${name}'] != null ? (json['${name}'] is num ? (json['${name}'] as num).toInt() : int.tryParse(json['${name}'].toString()) ?? ${fallback}) : ${fallback},`;
-    }
-
-    if (dartType === 'double') {
-      const fallback = nullable ? 'null' : '0.0';
-      return `      ${name}: json['${name}'] != null ? (json['${name}'] is num ? (json['${name}'] as num).toDouble() : double.tryParse(json['${name}'].toString()) ?? ${fallback}) : ${fallback},`;
-    }
-
-    if (dartType === 'bool') {
-      const fallback = nullable ? 'null' : 'false';
-      return `      ${name}: json['${name}'] != null ? (json['${name}'] is bool ? json['${name}'] as bool : json['${name}'].toString().toLowerCase() == 'true') : ${fallback},`;
-    }
-
-    if (dartType === 'DateTime') {
-      const fallback = nullable ? 'null' : 'DateTime.fromMillisecondsSinceEpoch(0)';
-      return `      ${name}: json['${name}'] != null ? DateTime.parse(json['${name}'].toString()) : ${fallback},`;
-    }
-
-    // String or custom types: coerce to String for primitives, leave object as-is for custom types
-    if (dartType === 'String') {
-      const fallback = nullable ? 'null' : "''";
-      return `      ${name}: json['${name}'] != null ? json['${name}'].toString() : ${fallback},`;
-    }
-
-    // Fallback generic: keep raw JSON (caller can handle) - nullable fallback to null or an empty map
-    const fallback = nullable ? 'null' : '{}';
-    return `      ${name}: json['${name}'] != null ? json['${name}'] : ${fallback},`;
-  }).join('\n');
-
-  // toJson: serializa, DateTime -> toIso8601String()
-  const toJsonBody = cls.attributes.map(a => {
-    if (mapUmlTypeToDart(a.type) === 'DateTime') {
-      return `      '${a.name}': ${a.name}?.toIso8601String(),`;
-    }
-    return `      '${a.name}': ${a.name},`;
-  }).join('\n');
-
-  return `class ${className} {
-${fields}
-
-  ${className}({
-${ctorParams}
-  });
-
-  factory ${className}.fromJson(Map<String, dynamic> json) => ${className}(
-${fromJsonBody}
-  );
-
-  Map<String, dynamic> toJson() => {
-${toJsonBody}
-  };
-}
-`;
+export interface FlutterGeneratorOptions {
+  /** URL base de la API REST (default: http://localhost:3000) */
+  apiBaseUrl?: string;
+  
+  /** Habilitar plataforma web (default: true) */
+  enableWeb?: boolean;
+  
+  /** Habilitar plataforma Windows (default: true) */
+  enableWindows?: boolean;
+  
+  /** Timeout para comandos flutter (default: 5 minutos) */
+  timeoutMs?: number;
 }
 
 /**
- * generateListScreenDart
- * - Crea una pantalla List + Detail para la clase proporcionada.
- * - La ListScreen recibe una lista de items y navega a Detail al tocar un elemento.
- * - Detail muestra todos los pares clave:valor del objeto mediante toJson().
- *
- * Nota: usa rutas y navegación básica MaterialPageRoute para simplicidad.
+ * Genera un proyecto Flutter completo desde un diagrama UML
+ * 
+ * Proceso:
+ * 1. Validar diagrama de entrada
+ * 2. Crear estructura de carpetas del proyecto
+ * 3. Generar modelos (data layer)
+ * 4. Generar servicios (business layer)
+ * 5. Generar páginas y widgets (presentation layer)
+ * 6. Generar navegación (rutas + sidebar)
+ * 7. Generar archivos de configuración (pubspec, main)
+ * 8. Habilitar plataformas (web, windows)
+ * 9. Empaquetar en ZIP
+ * 
+ * @param diagram - Diagrama UML con clases y relaciones
+ * @param options - Opciones de configuración
+ * @returns Ruta del archivo ZIP generado
+ * @throws Error si falla la generación
  */
-function generateListScreenDart(className: string): string {
-  const lc = className.toLowerCase();
-  return `import 'package:flutter/material.dart';
-import '../models/${lc}.dart';
+export async function generateFlutterFromDiagram(
+  diagram: UMLDiagramJSON,
+  options: FlutterGeneratorOptions = {}
+): Promise<string> {
+  console.log('[FlutterGenerator] Iniciando generación de proyecto Flutter...');
+  
+  // ============ 1. VALIDACIÓN ============
+  
+  if (!diagram || !Array.isArray(diagram.classes) || diagram.classes.length === 0) {
+    throw new Error('El diagrama debe contener al menos una clase');
+  }
 
-class ${className}ListScreen extends StatelessWidget {
-  final List<${className}> items;
-  const ${className}ListScreen({super.key, required this.items});
+  const {
+    apiBaseUrl = 'http://localhost:3000',
+    enableWeb = true,
+    enableWindows = true,
+    timeoutMs = 5 * 60 * 1000
+  } = options;
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('${className} List')),
-      body: ListView.builder(
-        itemCount: items.length,
-        itemBuilder: (_, i) {
-          final it = items[i];
-          // Muestra el primer valor del map como título (fallback simple)
-          return ListTile(
-            title: Text(it.toJson().values.first?.toString() ?? '${className}'),
-            subtitle: Text(items[i].toJson().toString()),
-            onTap: () => Navigator.push(context, MaterialPageRoute(
-              builder: (_) => ${className}DetailScreen(item: it),
-            )),
+  // ============ 2. PREPARAR RUTAS ============
+  
+  const projectId = uuidv4();
+  const outputDir = path.join(process.cwd(), 'generated');
+  const projectDir = path.join(outputDir, projectId);
+  const zipPath = path.join(outputDir, `${projectId}.zip`);
+
+  // Asegurar que existe el directorio de salida
+  await mkdir(outputDir, { recursive: true });
+  await mkdir(projectDir, { recursive: true });
+
+  console.log(`[FlutterGenerator] Proyecto: ${projectDir}`);
+  console.log(`[FlutterGenerator] ZIP final: ${zipPath}`);
+
+  try {
+    // ============ 3. ESTRUCTURA DE CARPETAS ============
+    
+    await createProjectStructure(projectDir);
+
+    // ============ 4. PROCESAR RELACIONES ============
+    
+    // Crear mapa de IDs a nombres de clases
+    const classesMap = new Map<string, string>();
+    diagram.classes.forEach(cls => {
+      if (cls.id) {
+        classesMap.set(cls.id, cls.name);
+      }
+    });
+
+    // Procesar relaciones por clase
+    const relationsMap = new Map<string, ProcessedRelation[]>();
+    if (diagram.relations && diagram.relations.length > 0) {
+      diagram.classes.forEach(cls => {
+        if (cls.id) {
+          const relations = getRelationsForClass(
+            cls.name,
+            cls.id,
+            diagram.relations!,
+            classesMap
           );
-        },
-      ),
-    );
+          relationsMap.set(cls.name, relations);
+        }
+      });
+    }
+
+    console.log(`[FlutterGenerator] Clases detectadas: ${diagram.classes.length}`);
+    console.log(`[FlutterGenerator] Relaciones detectadas: ${diagram.relations?.length || 0}`);
+
+    // ============ 5. GENERAR DATA LAYER (Modelos) ============
+    
+    console.log('[FlutterGenerator] Generando modelos...');
+    await generateModels(projectDir, diagram.classes, relationsMap);
+
+    // ============ 6. GENERAR BUSINESS LAYER (Servicios) ============
+    
+    console.log('[FlutterGenerator] Generando servicios...');
+    await generateServices(projectDir, diagram.classes, apiBaseUrl);
+
+    // ============ 7. GENERAR PRESENTATION LAYER (Páginas) ============
+    
+    console.log('[FlutterGenerator] Generando páginas...');
+    await generatePages(projectDir, diagram.classes);
+
+    // ============ 8. GENERAR NAVEGACIÓN ============
+    
+    console.log('[FlutterGenerator] Generando navegación...');
+    const appName = diagram.name || 'Mi App';
+    await generateNavigation(projectDir, diagram.classes, appName);
+
+    // ============ 9. GENERAR CONFIGURACIÓN ============
+    
+    console.log('[FlutterGenerator] Generando archivos de configuración...');
+    await generateConfiguration(projectDir, diagram.package || appName, appName);
+
+    // ============ 10. HABILITAR PLATAFORMAS ============
+    
+    console.log('[FlutterGenerator] Habilitando plataformas Flutter...');
+    await enableFlutterPlatforms(projectDir, {
+      enableWeb,
+      enableWindows,
+      timeoutMs
+    });
+
+    // ============ 11. EMPAQUETAR EN ZIP ============
+    
+    console.log('[FlutterGenerator] Empaquetando proyecto en ZIP...');
+    await zipDirectory(projectDir, zipPath);
+
+    console.log('[FlutterGenerator] ✅ Generación completada exitosamente');
+    console.log(`[FlutterGenerator] Archivo ZIP: ${zipPath}`);
+
+    return zipPath;
+
+  } catch (error) {
+    console.error('[FlutterGenerator] ❌ Error durante la generación:', error);
+    
+    // Limpiar archivos temporales en caso de error
+    try {
+      await fs.promises.rm(projectDir, { recursive: true, force: true });
+    } catch (cleanupError) {
+      console.error('[FlutterGenerator] Error al limpiar archivos temporales:', cleanupError);
+    }
+
+    throw error;
   }
 }
 
-class ${className}DetailScreen extends StatelessWidget {
-  final ${className} item;
-  const ${className}DetailScreen({super.key, required this.item});
+/**
+ * Crea la estructura de carpetas del proyecto Flutter
+ * 
+ * Estructura generada:
+ * project/
+ * ├── lib/
+ * │   ├── models/
+ * │   ├── services/
+ * │   ├── pages/
+ * │   │   ├── home/
+ * │   │   └── <clase>/
+ * │   └── widgets/
+ * ├── test/
+ * └── android/ (generado por flutter create)
+ */
+async function createProjectStructure(projectDir: string): Promise<void> {
+  const dirs = [
+    'lib/models',
+    'lib/services',
+    'lib/pages',
+    'lib/widgets',
+    'test'
+  ];
 
-  @override
-  Widget build(BuildContext context) {
-    final map = item.toJson();
-    return Scaffold(
-      appBar: AppBar(title: Text('${className} Detail')),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: map.entries.map((e) => Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
-            child: Text('\${e.key}: \${e.value}'),
-          )).toList(),
-        ),
-      ),
-    );
+  for (const dir of dirs) {
+    const fullPath = path.join(projectDir, dir);
+    await mkdir(fullPath, { recursive: true });
+  }
+
+  console.log('[FlutterGenerator] Estructura de carpetas creada');
+}
+
+/**
+ * Genera todos los modelos (data layer)
+ * Un archivo .dart por cada clase UML
+ */
+async function generateModels(
+  projectDir: string,
+  classes: UMLClass[],
+  relationsMap: Map<string, ProcessedRelation[]>
+): Promise<void> {
+  const modelsDir = path.join(projectDir, 'lib/models');
+
+  for (const cls of classes) {
+    const relations = relationsMap.get(cls.name) || [];
+    const modelCode = generateModelDart(cls, relations);
+    const fileName = `${cls.name.toLowerCase()}.dart`;
+    const filePath = path.join(modelsDir, fileName);
+
+    await writeFile(filePath, modelCode, 'utf-8');
+    console.log(`  ✓ Modelo generado: ${fileName}`);
   }
 }
-`;
-}
 
 /**
- * generateMainDart
- * - Genera main.dart y la clase MyApp que:
- *   - importa modelos y screens generadas
- *   - prepara listas de ejemplo (basadas en atributos) para que la app muestre datos al iniciar
- *   - registra rutas simples para navegar a cada ListScreen
- *
- * Limitación: las listas de ejemplo usan objetos construidos con fromJson({ campo: null })
- * para evitar tener que inferir valores reales.
+ * Genera todos los servicios (business layer)
+ * Un archivo de servicio por cada clase
  */
-function generateMainDart(classes: UMLClass[]): { main: string; app: string } {
-  const imports = classes.map(c => `import 'models/${c.name.toLowerCase()}.dart';`).join('\n');
+async function generateServices(
+  projectDir: string,
+  classes: UMLClass[],
+  apiBaseUrl: string
+): Promise<void> {
+  const servicesDir = path.join(projectDir, 'lib/services');
 
-  // Crea listas de ejemplo para cada entidad (un elemento con valores nulos)
-  const sampleLists = classes.map(c => {
-    const name = c.name;
-    const sample = c.attributes.length ? `{ ${c.attributes.map(a => `'${a.name}': null`).join(', ')} }` : '{}';
-    return `  final ${name.toLowerCase()}s = <${name}>[ ${name}.fromJson(${sample}) ];`;
-  }).join('\n');
+  for (const cls of classes) {
+    const serviceCode = generateServiceDart(cls.name, apiBaseUrl);
+    const fileName = `${cls.name.toLowerCase()}_service.dart`;
+    const filePath = path.join(servicesDir, fileName);
 
-  // Rutas para cada entidad: '/classname' -> ClassNameListScreen
-  const routes = classes.map(c => `        '/${c.name.toLowerCase()}': (context) => ${c.name}ListScreen(items: ${c.name.toLowerCase()}s),`).join('\n');
-
-  const appImports = classes.map(c => `import 'screens/${c.name.toLowerCase()}_list.dart';`).join('\n');
-
-  const main = `import 'package:flutter/material.dart';
-${imports}
-${appImports}
-
-void main() {
-  runApp(const MyApp());
-}
-`;
-
-  const app = `class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-${sampleLists ? sampleLists : ''}
-    return MaterialApp(
-      title: 'Generated App',
-      theme: ThemeData(primarySwatch: Colors.blue),
-      routes: {
-${routes}
-      },
-      home: Scaffold(
-        appBar: AppBar(title: const Text('Generated App')),
-        body: Center(child: Text('Navega a las rutas generadas')),
-      ),
-    );
+    await writeFile(filePath, serviceCode, 'utf-8');
+    console.log(`  ✓ Servicio generado: ${fileName}`);
   }
 }
-`;
-  return { main, app };
+
+/**
+ * Genera todas las páginas (presentation layer)
+ * Para cada clase:
+ * - Página de lista (ListView)
+ * - Página de formulario (Create/Edit)
+ */
+async function generatePages(
+  projectDir: string,
+  classes: UMLClass[]
+): Promise<void> {
+  const pagesDir = path.join(projectDir, 'lib/pages');
+
+  for (const cls of classes) {
+    const lowerName = cls.name.toLowerCase();
+    const classDir = path.join(pagesDir, lowerName);
+    await mkdir(classDir, { recursive: true });
+
+    // Página de lista
+    const listPageCode = generateListPageDart(cls.name, cls.attributes);
+    const listPagePath = path.join(classDir, `${lowerName}_list_page.dart`);
+    await writeFile(listPagePath, listPageCode, 'utf-8');
+
+    // Página de formulario
+    const formPageCode = generateFormPageDart(cls.name, cls.attributes);
+    const formPagePath = path.join(classDir, `${lowerName}_form_page.dart`);
+    await writeFile(formPagePath, formPageCode, 'utf-8');
+
+    console.log(`  ✓ Páginas generadas: ${lowerName}_list_page.dart, ${lowerName}_form_page.dart`);
+  }
 }
 
 /**
- * generatePubspec
- * - Genera un pubspec.yaml mínimo para que el proyecto sea reconocible por Flutter.
- * - No incluye dependencias de codegen para evitar pasos adicionales al usuario.
+ * Genera componentes de navegación
+ * - Rutas (routes.dart)
+ * - Sidebar (app_drawer.dart)
+ * - Home page (home_page.dart)
  */
-function generatePubspec(name: string) {
-  return `name: ${name}
-description: Generated Flutter app
-publish_to: 'none'
-environment:
-  sdk: ">=2.18.0 <4.0.0"
-dependencies:
-  flutter:
-    sdk: flutter
-  cupertino_icons: ^1.0.2
+async function generateNavigation(
+  projectDir: string,
+  classes: UMLClass[],
+  appName: string
+): Promise<void> {
+  const libDir = path.join(projectDir, 'lib');
+  const widgetsDir = path.join(projectDir, 'lib/widgets');
+  const homeDir = path.join(projectDir, 'lib/pages/home');
 
-flutter:
-  uses-material-design: true
-`;
+  await mkdir(widgetsDir, { recursive: true });
+  await mkdir(homeDir, { recursive: true });
+
+  const classNames = classes.map(c => c.name);
+
+  // Generar rutas
+  const routesCode = generateRoutesDart(classNames);
+  await writeFile(path.join(libDir, 'routes.dart'), routesCode, 'utf-8');
+  console.log('  ✓ Rutas generadas: routes.dart');
+
+  // Generar sidebar
+  const sidebarCode = generateSidebarDart(classNames, appName);
+  await writeFile(path.join(widgetsDir, 'app_drawer.dart'), sidebarCode, 'utf-8');
+  console.log('  ✓ Sidebar generado: app_drawer.dart');
+
+  // Generar home page
+  const homePageCode = generateHomePageDart(classNames, appName);
+  await writeFile(path.join(homeDir, 'home_page.dart'), homePageCode, 'utf-8');
+  console.log('  ✓ Home page generado: home_page.dart');
 }
 
 /**
- * generateFlutterFromDiagram
- * - Punto principal exportado por el módulo.
- * - Crea un directorio temporal under generated/<id>/ con la estructura de proyecto (pubspec + lib/models + lib/screens + lib/main.dart)
- * - Escribe archivos para cada clase en diagram.classes
- * - Empaqueta el directorio en generated/<id>.zip y devuelve la ruta al ZIP
- *
- * Comportamiento de errores:
- * - Lanza excepción si hay fallo en escritura/compresión; el caller debe manejar/limpiar.
- *
- * Uso esperado:
- * - El route handler del servidor invoca esta función con el UMLDiagramJSON y luego sirve el ZIP resultante al cliente.
+ * Genera archivos de configuración
+ * - pubspec.yaml
+ * - main.dart
+ * - analysis_options.yaml
+ * - README.md
  */
-export async function generateFlutterFromDiagram(diagram: UMLDiagramJSON): Promise<string> {
-  // Id único para el proyecto temporal
-  const id = `flutter_${uuidv4()}`;
-  const tmpDir = path.resolve(process.cwd(), 'generated', id);
-
-  // Asegura que el directorio exista (no falla si ya existe)
-  try { await stat(tmpDir); } catch { await mkdir(tmpDir, { recursive: true }); }
+async function generateConfiguration(
+  projectDir: string,
+  packageName: string,
+  appName: string
+): Promise<void> {
+  const libDir = path.join(projectDir, 'lib');
 
   // pubspec.yaml
-  await writeFile(path.join(tmpDir, 'pubspec.yaml'), generatePubspec(diagram.package || 'generated_app'), 'utf8');
+  const pubspecCode = generatePubspecYaml(packageName);
+  await writeFile(path.join(projectDir, 'pubspec.yaml'), pubspecCode, 'utf-8');
+  console.log('  ✓ Configuración generada: pubspec.yaml');
 
-  // Estructura lib/ y subcarpetas
-  const libDir = path.join(tmpDir, 'lib');
-  await mkdir(libDir, { recursive: true });
-  await mkdir(path.join(libDir, 'models'), { recursive: true });
-  await mkdir(path.join(libDir, 'screens'), { recursive: true });
+  // main.dart
+  const mainCode = generateMainDart(appName);
+  await writeFile(path.join(libDir, 'main.dart'), mainCode, 'utf-8');
+  console.log('  ✓ Main generado: main.dart');
 
-  // Genera modelos y pantallas para cada clase del diagrama
-  for (const cls of diagram.classes) {
-    // Modelo Dart (lib/models/<classname>.dart)
-    const modelCode = generateModelDart({ name: cls.name, attributes: cls.attributes });
-    await writeFile(path.join(libDir, 'models', `${cls.name.toLowerCase()}.dart`), modelCode, 'utf8');
+  // analysis_options.yaml
+  const analysisOptions = `include: package:flutter_lints/flutter.yaml
 
-    // Pantalla List + Detail (lib/screens/<classname>_list.dart)
-    const screenCode = generateListScreenDart(cls.name);
-    await writeFile(path.join(libDir, 'screens', `${cls.name.toLowerCase()}_list.dart`), screenCode, 'utf8');
-  }
+linter:
+  rules:
+    - prefer_const_constructors
+    - prefer_const_literals_to_create_immutables
+    - avoid_print
+`;
+  await writeFile(path.join(projectDir, 'analysis_options.yaml'), analysisOptions, 'utf-8');
 
-  // Genera main.dart con wiring de la app y rutas
-  const { main, app } = generateMainDart(diagram.classes);
-  await writeFile(path.join(libDir, 'main.dart'), `${main}\n${app}`, 'utf8');
+  // README.md
+  const readme = `# ${appName}
 
-  // <-- NUEVA LLAMADA: generar los ficheros de plataforma (web/windows) con flutter create
-  try {
-    // Intentamos crear los artefactos de plataforma si 'flutter' está disponible.
-    // Si falla, capturamos el error pero seguimos para que el ZIP aún sea devuelto (con lib/ y pubspec).
-    await enableFlutterPlatforms(tmpDir, { enableWeb: true, enableWindows: true, timeoutMs: 2 * 60 * 1000 });
-  } catch (e) {
-    console.warn('enableFlutterPlatforms falló o flutter no está disponible en PATH. El proyecto seguirá conteniendo lib/ y pubspec.yaml. Error:', e);
-  }
+Proyecto Flutter generado automáticamente desde diagrama UML.
 
-  // Empaqueta el directorio temporal en un ZIP dentro de generated/
-  const zipPath = path.resolve(process.cwd(), 'generated', `${id}.zip`);
-  const output = fs.createWriteStream(zipPath);
-  const archive = archiver('zip', { zlib: { level: 9 } });
+## 🚀 Ejecutar proyecto
 
-  return new Promise<string>((resolve, reject) => {
-    // Cuando la escritura finaliza, resolvemos con la ruta al ZIP
-    output.on('close', () => resolve(zipPath));
-    archive.on('error', err => reject(err));
+\`\`\`bash
+# Instalar dependencias
+flutter pub get
+
+# Ejecutar en modo desarrollo
+flutter run
+
+# Ejecutar en web
+flutter run -d chrome
+
+# Compilar para producción
+flutter build apk  # Android
+flutter build web  # Web
+\`\`\`
+
+## 📂 Estructura
+
+- **lib/models/** - Modelos de datos (Data Layer)
+- **lib/services/** - Servicios API REST (Business Layer)
+- **lib/pages/** - Páginas de la aplicación (Presentation Layer)
+- **lib/widgets/** - Widgets reutilizables
+
+## 🔧 Configuración
+
+Editar la URL base de la API en cada servicio:
+\`\`\`dart
+// lib/services/*_service.dart
+static const String baseUrl = 'http://localhost:3000';
+\`\`\`
+
+## 📱 Características
+
+- ✅ Arquitectura en capas (Presentación, Negocio, Datos)
+- ✅ CRUD completo por cada entidad
+- ✅ Navegación con Drawer (sidebar)
+- ✅ Consumo de API REST
+- ✅ Validaciones de formularios
+- ✅ Manejo de estados (loading, error, empty)
+- ✅ Diseño Material Design 3
+
+## 🛠️ Tecnologías
+
+- Flutter SDK ^3.0.0
+- http ^1.1.0 (cliente HTTP)
+- Material Design 3
+`;
+  await writeFile(path.join(projectDir, 'README.md'), readme, 'utf-8');
+  console.log('  ✓ README generado: README.md');
+}
+
+/**
+ * Empaqueta el proyecto en un archivo ZIP
+ */
+async function zipDirectory(sourceDir: string, outPath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const output = fs.createWriteStream(outPath);
+    const archive = archiver('zip', { zlib: { level: 9 } });
+
+    output.on('close', () => {
+      console.log(`[FlutterGenerator] ZIP creado: ${archive.pointer()} bytes`);
+      resolve();
+    });
+
+    archive.on('error', (err) => {
+      console.error('[FlutterGenerator] Error al crear ZIP:', err);
+      reject(err);
+    });
 
     archive.pipe(output);
-    // Añade todo el contenido del tmpDir al ZIP (sin envolver en una carpeta extra)
-    archive.directory(tmpDir, false);
+    archive.directory(sourceDir, false);
     archive.finalize();
   });
 }
