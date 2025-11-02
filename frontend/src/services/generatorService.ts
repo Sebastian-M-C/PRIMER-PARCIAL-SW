@@ -42,12 +42,12 @@ export async function downloadFlutterZip(diagram: UMLDiagramJSON, filename?: str
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = filename ?? `${diagram.package ?? 'generated_app'}.zip`;
+  a.download = filename ?? 'flutter-app.zip';
   document.body.appendChild(a);
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
-
+  
   console.log('[generatorService] Descarga iniciada:', a.download);
 }
 

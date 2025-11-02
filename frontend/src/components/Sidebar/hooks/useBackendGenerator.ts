@@ -114,14 +114,11 @@ export function useBackendGenerator() {
         }))
       };
 
-      console.log('📱 Generando app Flutter con:', umlJson);
+      console.log('📱 Generando app Flutter (zip: flutter-app.zip) con:', umlJson);
 
       // Usar el servicio de generación
-      await downloadFlutterZip(
-        umlJson,
-        `${diagram.name || 'flutter-app'}.zip`
-      );
-
+      await downloadFlutterZip(umlJson, 'flutter-app.zip');
+      
       alert('✅ Aplicación Flutter generada exitosamente');
     } catch (error) {
       console.error('Error generating Flutter app:', error);

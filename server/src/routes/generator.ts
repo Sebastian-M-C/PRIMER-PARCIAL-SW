@@ -80,7 +80,7 @@ router.post('/flutter', async (req, res) => {
     console.log('[Flutter Generator] ✅ Enviando ZIP al cliente...');
 
     // Enviar archivo
-    return res.download(zipPath, path.basename(zipPath), (err) => {
+    return res.download(zipPath, "flutter-app.zip", (err) => {
       if (err) {
         console.error('[Flutter Generator] Error al enviar ZIP:', err);
         if (!res.headersSent) {
