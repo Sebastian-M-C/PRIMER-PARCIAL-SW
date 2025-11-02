@@ -232,7 +232,7 @@ async function generateApplicationProperties(projectDir: string, basePackage: st
   const propertiesContent = `# Database Configuration
 spring.datasource.url=jdbc:postgresql://localhost:5432/umltool
 spring.datasource.username=postgres
-spring.datasource.password=postgres
+spring.datasource.password=
 spring.datasource.driver-class-name=org.postgresql.Driver
 
 # JPA/Hibernate Configuration
@@ -620,7 +620,8 @@ public class ${cls.name}ServiceImpl implements ${cls.name}Service {
     }
     
     private void updateEntity(${cls.name}Request request, ${cls.name} entity) {${generateUpdateFieldsForEntity(cls)}
-    }`;
+    }
+}`;
 
     await fs.promises.writeFile(
       path.join(implPackagePath, `${cls.name}ServiceImpl.java`),
