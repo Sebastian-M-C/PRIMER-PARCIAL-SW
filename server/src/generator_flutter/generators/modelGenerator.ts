@@ -45,9 +45,11 @@ export function generateModelDart(
   // ============ CAMPOS ============
   
   const attributeFields = attributes.map(attr => {
+    const isId = attr.isId ?? false;
     const dartType = mapUmlTypeToDart(attr.type);
-    const nullSuffix = attr.nullable ? '?' : '';
-    const comment = attr.isId ? '  /// Identificador único\n' : '';
+    // Si es ID lo tratamos como nullable para permitir creación sin id
+    const nullSuffix = (attr.nullable || isId) ? '?' : '';
+    const comment = isId ? '  /// Identificador único\n' : '';
     return `${comment}  final ${dartType}${nullSuffix} ${attr.name};`;
   });
 
@@ -61,7 +63,8 @@ export function generateModelDart(
   // ============ CONSTRUCTOR ============
   
   const attributeParams = attributes.map(attr => {
-    const required = attr.nullable ? '' : 'required ';
+    const isId = attr.isId ?? false;
+    const required = (attr.nullable || isId) ? '' : 'required ';
     return `    ${required}this.${attr.name},`;
   });
 

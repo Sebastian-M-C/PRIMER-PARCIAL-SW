@@ -17,9 +17,13 @@ export function generateServiceDart(
   baseUrl: string = 'http://localhost:3000',
   resourcePath?: string
 ): string {
-  const resource = resourcePath || `${className.toLowerCase()}s`;
+  // Normalizar a snake_case para nombres de archivo/import y resourcePath
+  const makeLower = (n: string) =>
+    n.replace(/[^\w\s]/g, '').replace(/\s+/g, '_').toLowerCase();
+  const lowerName = makeLower(className);
+  const resource = resourcePath || `${lowerName}s`;
   const serviceName = `${className}Service`;
-  const modelImport = className.toLowerCase();
+  const modelImport = lowerName;
 
   return `import 'dart:convert';
 import 'package:http/http.dart' as http;

@@ -30,7 +30,8 @@ class MyApp extends StatelessWidget {
           centerTitle: true,
           elevation: 2,
         ),
-        cardTheme: CardTheme(
+        // No usar 'const' aquí porque BorderRadius.circular no es const
+        cardTheme: CardThemeData(
           elevation: 2,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(8),
@@ -38,7 +39,7 @@ class MyApp extends StatelessWidget {
         ),
       ),
       initialRoute: '/',
-      onGenerateRoute: AppRoutes.generateRoute,
+      routes: appRoutes,
     );
   }
 }

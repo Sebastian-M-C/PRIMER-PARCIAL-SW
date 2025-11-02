@@ -7,7 +7,7 @@ import { v4 as uuidv4 } from 'uuid';
 // Generadores
 import { generateModelDart, UMLClass, UMLAttribute } from './generators/modelGenerator';
 import { generateServiceDart } from './generators/serviceGenerator';
-import { generateListPageDart, generateFormPageDart } from './generators/pageGenerator';
+import { generateListPageDart, generateFormPageDart } from './generators/pages/pageGenerator';
 import { generateSidebarDart } from './generators/sidebarGenerator';
 import { generateRoutesDart } from './generators/routeGenerator';
 import { generateHomePageDart } from './generators/widgetGenerator';
