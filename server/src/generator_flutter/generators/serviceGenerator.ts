@@ -1,166 +1,152 @@
-/**
- * Genera un servicio Dart para consumir API REST
- * Incluye métodos CRUD completos:
- * - getAll() → GET /api/<resource>
- * - getById(id) → GET /api/<resource>/:id
- * - create(model) → POST /api/<resource>
- * - update(id, model) → PUT /api/<resource>/:id
- * - delete(id) → DELETE /api/<resource>/:id
- * 
- * @param className - Nombre de la clase (ej: Usuario)
- * @param baseUrl - URL base de la API (ej: http://localhost:3000)
- * @param resourcePath - Path del recurso (ej: usuarios)
- * @returns Código Dart del servicio
- */
-export function generateServiceDart(
-  className: string,
-  baseUrl: string = 'http://localhost:3000',
-  resourcePath?: string
-): string {
-  // Normalizar a snake_case para nombres de archivo/import y resourcePath
-  const makeLower = (n: string) =>
-    n.replace(/[^\w\s]/g, '').replace(/\s+/g, '_').toLowerCase();
-  const lowerName = makeLower(className);
-  const resource = resourcePath || `${lowerName}s`;
-  const serviceName = `${className}Service`;
-  const modelImport = lowerName;
+// Agrega estas funciones al principio de serviceGenerator.ts
+function toKebabCase(name: string): string {
+  return name
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .replace(/[\s_]+/g, '-')
+    .replace(/[^a-zA-Z0-9\-]/g, '')
+    .toLowerCase();
+}
+
+function pluralizeKebab(name: string): string {
+  const kebab = toKebabCase(name);
+  // Reglas básicas de pluralización en inglés
+  if (kebab.endsWith('y')) return kebab.slice(0, -1) + 'ies';
+  if (kebab.endsWith('s') || kebab.endsWith('x') || kebab.endsWith('z') || 
+      kebab.endsWith('ch') || kebab.endsWith('sh')) {
+    return kebab + 'es';
+  }
+  return kebab + 's';
+}
+
+export function generateServiceDart(entityName: string): string {
+  const entity = entityName.charAt(0).toUpperCase() + entityName.slice(1);
+  const entityLower = entityName.toLowerCase();
+  const route = pluralizeKebab(entityName);
 
   return `import 'dart:convert';
 import 'package:http/http.dart' as http;
-import '../models/${modelImport}.dart';
+import '../models/${entityLower}.dart';
+import '../config.dart';  // ← IMPORTAR CONFIG
 
-/// Servicio para gestionar operaciones CRUD de ${className}
-/// Consume la API REST del backend
-class ${serviceName} {
-  /// URL base de la API
-  static const String baseUrl = '${baseUrl}';
-  
-  /// Path del recurso en la API
-  static const String resourcePath = '${resource}';
-  
-  /// URL completa del endpoint
-  static String get endpoint => '\$baseUrl/api/\$resourcePath';
+class ${entity}Service {
+  // ✅ QUITAR baseUrl - ya no es necesario
+  ${entity}Service();  // ✅ CONSTRUCTOR SIMPLIFICADO
 
-  /// Obtiene todas las instancias de ${className}
-  /// 
-  /// Realiza GET /api/${resource}
-  /// @returns Lista de objetos ${className}
-  /// @throws Exception si falla la petición
-  Future<List<${className}>> getAll() async {
+  String get _endpoint => AppConfig.getApiUrl('${route}');
+
+  // CREATE
+  Future<${entity}?> create(${entity} item) async {
     try {
-      final response = await http.get(
-        Uri.parse(endpoint),
-        headers: {'Content-Type': 'application/json'},
-      );
+      final requestData = item.toJson();
+      requestData.remove('id');
+      requestData.remove('createdAt');
+      requestData.remove('updatedAt');
 
-      if (response.statusCode == 200) {
-        final List<dynamic> jsonList = json.decode(response.body);
-        return jsonList.map((json) => ${className}.fromJson(json)).toList();
-      } else {
-        throw Exception('Error al obtener ${resource}: \${response.statusCode}');
+      final res = await http.post(
+        Uri.parse(_endpoint),
+        headers: AppConfig.defaultHeaders,  // ✅ HEADERS DESDE CONFIG
+        body: jsonEncode(requestData),
+      ).timeout(const Duration(seconds: AppConfig.httpTimeout));
+      
+      if (res.statusCode == 201) {
+        return ${entity}.fromJson(jsonDecode(res.body));
       }
+      throw Exception('Error creando ${entity}: \${res.statusCode}');
     } catch (e) {
-      throw Exception('Error de red al obtener ${resource}: \$e');
+      throw Exception('Error en create: \$e');
     }
   }
 
-  /// Obtiene una instancia específica de ${className} por ID
-  /// 
-  /// Realiza GET /api/${resource}/:id
-  /// @param id - Identificador único
-  /// @returns Objeto ${className}
-  /// @throws Exception si falla la petición o no existe
-  Future<${className}> getById(dynamic id) async {
+  // READ ALL
+  Future<List<${entity}>> list() async {
     try {
-      final response = await http.get(
-        Uri.parse('\$endpoint/\$id'),
-        headers: {'Content-Type': 'application/json'},
-      );
-
-      if (response.statusCode == 200) {
-        return ${className}.fromJson(json.decode(response.body));
-      } else if (response.statusCode == 404) {
-        throw Exception('${className} con ID \$id no encontrado');
-      } else {
-        throw Exception('Error al obtener ${className}: \${response.statusCode}');
+      final res = await http.get(
+        Uri.parse(_endpoint),
+        headers: AppConfig.defaultHeaders,  // ✅ HEADERS DESDE CONFIG
+      ).timeout(const Duration(seconds: AppConfig.httpTimeout));
+      
+      if (res.statusCode == 200) {
+        final List data = jsonDecode(res.body) as List;
+        return data.map((e) => ${entity}.fromJson(e)).toList();
       }
+      throw Exception('Error listando ${entity}: \${res.statusCode}');
     } catch (e) {
-      throw Exception('Error de red al obtener ${className}: \$e');
+      throw Exception('Error en list: \$e');
     }
   }
 
-  /// Crea una nueva instancia de ${className}
-  /// 
-  /// Realiza POST /api/${resource}
-  /// @param item - Objeto ${className} a crear
-  /// @returns Objeto ${className} creado (con ID asignado)
-  /// @throws Exception si falla la petición
-  Future<${className}> create(${className} item) async {
+  // READ BY ID
+  Future<${entity}?> getById(dynamic id) async {
     try {
-      final response = await http.post(
-        Uri.parse(endpoint),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode(item.toJson()),
-      );
-
-      if (response.statusCode == 201 || response.statusCode == 200) {
-        return ${className}.fromJson(json.decode(response.body));
-      } else {
-        throw Exception('Error al crear ${className}: \${response.statusCode} - \${response.body}');
+      final res = await http.get(
+        Uri.parse('\${_endpoint}/\$id'),
+        headers: AppConfig.defaultHeaders,  // ✅ HEADERS DESDE CONFIG
+      ).timeout(const Duration(seconds: AppConfig.httpTimeout));
+      
+      if (res.statusCode == 200) {
+        return ${entity}.fromJson(jsonDecode(res.body));
       }
+      if (res.statusCode == 404) return null;
+      throw Exception('Error obteniendo ${entity} (\$id): \${res.statusCode}');
     } catch (e) {
-      throw Exception('Error de red al crear ${className}: \$e');
+      throw Exception('Error en getById: \$e');
     }
   }
 
-  /// Actualiza una instancia existente de ${className}
-  /// 
-  /// Realiza PUT /api/${resource}/:id
-  /// @param id - Identificador único
-  /// @param item - Objeto ${className} con datos actualizados
-  /// @returns Objeto ${className} actualizado
-  /// @throws Exception si falla la petición
-  Future<${className}> update(dynamic id, ${className} item) async {
+  // UPDATE
+  Future<${entity}?> update(dynamic id, ${entity} item) async {
     try {
-      final response = await http.put(
-        Uri.parse('\$endpoint/\$id'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode(item.toJson()),
-      );
+      final requestData = item.toJson();
+      requestData.remove('id');
+      requestData.remove('createdAt');
 
-      if (response.statusCode == 200) {
-        return ${className}.fromJson(json.decode(response.body));
-      } else if (response.statusCode == 404) {
-        throw Exception('${className} con ID \$id no encontrado');
-      } else {
-        throw Exception('Error al actualizar ${className}: \${response.statusCode} - \${response.body}');
+      final res = await http.put(
+        Uri.parse('\${_endpoint}/\$id'),
+        headers: AppConfig.defaultHeaders,  // ✅ HEADERS DESDE CONFIG
+        body: jsonEncode(requestData),
+      ).timeout(const Duration(seconds: AppConfig.httpTimeout));
+      
+      if (res.statusCode == 200) {
+        return ${entity}.fromJson(jsonDecode(res.body));
       }
+      throw Exception('Error actualizando ${entity} (\$id): \${res.statusCode}');
     } catch (e) {
-      throw Exception('Error de red al actualizar ${className}: \$e');
+      throw Exception('Error en update: \$e');
     }
   }
 
-  /// Elimina una instancia de ${className}
-  /// 
-  /// Realiza DELETE /api/${resource}/:id
-  /// @param id - Identificador único
-  /// @throws Exception si falla la petición
+  // DELETE
   Future<void> delete(dynamic id) async {
     try {
-      final response = await http.delete(
-        Uri.parse('\$endpoint/\$id'),
-        headers: {'Content-Type': 'application/json'},
-      );
-
-      if (response.statusCode != 200 && response.statusCode != 204) {
-        if (response.statusCode == 404) {
-          throw Exception('${className} con ID \$id no encontrado');
-        } else {
-          throw Exception('Error al eliminar ${className}: \${response.statusCode}');
-        }
+      final res = await http.delete(
+        Uri.parse('\${_endpoint}/\$id'),
+        headers: AppConfig.defaultHeaders,  // ✅ HEADERS DESDE CONFIG
+      ).timeout(const Duration(seconds: AppConfig.httpTimeout));
+      
+      if (res.statusCode != 204 && res.statusCode != 200) {
+        throw Exception('Error eliminando ${entity} (\$id): \${res.statusCode}');
       }
     } catch (e) {
-      throw Exception('Error de red al eliminar ${className}: \$e');
+      throw Exception('Error en delete: \$e');
+    }
+  }
+
+  // BÚSQUEDA POR EJEMPLO
+  Future<List<${entity}>> searchByExample(Map<String, dynamic> example) async {
+    try {
+      final res = await http.post(
+        Uri.parse('\${_endpoint}/search'),
+        headers: AppConfig.defaultHeaders,  // ✅ HEADERS DESDE CONFIG
+        body: jsonEncode(example),
+      ).timeout(const Duration(seconds: AppConfig.httpTimeout));
+      
+      if (res.statusCode == 200) {
+        final List data = jsonDecode(res.body) as List;
+        return data.map((e) => ${entity}.fromJson(e)).toList();
+      }
+      throw Exception('Error en búsqueda: \${res.statusCode}');
+    } catch (e) {
+      throw Exception('Error en searchByExample: \$e');
     }
   }
 }

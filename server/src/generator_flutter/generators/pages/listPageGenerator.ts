@@ -74,7 +74,7 @@ class _${className}ListPageState extends State<${className}ListPage> {
       _errorMessage = null;
     });
     try {
-      final items = await _service.getAll();
+      final items = await _service.list();
       setState(() { _items = items; _isLoading = false; });
     } catch (e) {
       // Si hay error, lo guardamos para mostrar en UI

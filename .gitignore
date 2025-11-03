@@ -109,6 +109,22 @@ Thumbs.db
 generated/
 server/generated/
 
+# Fuerza ignore recursivo en artefactos generados
+generated/
+generated/**
+
+# Flutter / Dart (protege artefactos dentro de generated/*)
+**/.dart_tool/
+**/build/
+**/.packages
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+
+# Evitar subir archivos binarios/apk/aab generados
+**/*.apk
+**/*.aab
+**/*.ipa
+
 # Docker
 docker-compose.override.yml
 

@@ -28,7 +28,7 @@ CICLO 1: FUNCIONALIDADES BÁSICAS
    - Modelos: Usuario, Proyecto, Diagrama, Invitación, Comentario
 
 TECNOLOGÍAS CICLO 1:
-- Backend: NestJS + TypeScript (Node 20+)
+- Backend: - Node.js 20 + Express 4
 - Frontend: React + Tailwind CSS
 - Base de datos: PostgreSQL
 
@@ -82,7 +82,7 @@ FUNCIONALIDADES CRÍTICAS POR IMPLEMENTAR:
 5. SISTEMA DE PRUEBAS AUTOMATIZADAS
 
 ENTREGABLES PRINCIPALES:
-- Aplicación web funcional (React + Django)
+- Aplicación web funcional (React + Express)
 - Generador de código Spring Boot
 - Editor UML colaborativo
 - Sistema de autenticación y permisos
