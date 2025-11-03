@@ -11,16 +11,6 @@ export function generateRoutesDart(classNames: string[]): string {
     .map(n => String(n || '').trim())
     .filter(n => n.length > 0);
 
-  if (validNames.length === 0) {
-    return `import 'package:flutter/material.dart';
-
-/// Rutas generadas automáticamente (ninguna clase encontrada)
-final Map<String, WidgetBuilder> appRoutes = {
-  '/': (context) => const Scaffold(body: Center(child: Text('No pages generated'))),
-};
-`;
-  }
-
   // Helpers para safe identifiers / paths
   const makeLower = (n: string) =>
     n.replace(/[^\w\s]/g, '').replace(/\s+/g, '_').toLowerCase();
@@ -32,32 +22,41 @@ final Map<String, WidgetBuilder> appRoutes = {
       .filter(Boolean)
       .map(part => part.charAt(0).toUpperCase() + part.slice(1))
       .join('');
-  
+
+  if (validNames.length === 0) {
+    return `import 'package:flutter/material.dart';
+
+/// Rutas generadas automáticamente (ninguna clase encontrada)
+Map<String, WidgetBuilder> buildAppRoutes() {
+  return {
+    '/': (context) => const Scaffold(body: Center(child: Text('No pages generated'))),
+  };
+}
+`;
+  }
+
+  // Imports para las páginas de lista (rutas principales)
   const imports = validNames.map(cls => {
     const lower = makeLower(cls);
     return `import 'pages/${lower}/${lower}_list_page.dart';`;
   }).join('\n');
 
-  // Entradas del mapa de rutas
-  const firstClass = validNames[0];
-  const firstClassSafe = toPascal(firstClass);
-
+  // Entradas del mapa de rutas (NOTA: no generamos '/' ya que main.dart define home)
   const routesEntries = validNames.map(cls => {
     const pascal = toPascal(cls);
     const lower = makeLower(cls);
-    const routeKey = `/${lower}s`;
-    // No forzamos const aquí para evitar fallos si la página no define constructor const
-    return `  '${routeKey}': (context) => ${pascal}ListPage(),`;
+    return `    '/${lower}s': (context) => ${pascal}ListPage(),`;
   }).join('\n');
 
   return `import 'package:flutter/material.dart';
 ${imports}
 
 /// Rutas generadas automáticamente
-/// Home apunta a la lista de ${firstClass}
-final Map<String, WidgetBuilder> appRoutes = {
-  '/': (context) => ${firstClassSafe}ListPage(),
+/// Devuelve el mapa de rutas utilizado por MaterialApp
+Map<String, WidgetBuilder> buildAppRoutes() {
+  return {
 ${routesEntries}
-};
+  };
+}
 `;
 }

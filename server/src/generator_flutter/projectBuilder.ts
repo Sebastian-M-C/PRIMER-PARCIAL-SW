@@ -129,7 +129,9 @@ export async function generateNavigation(projectDir: string, classes: UMLClass[]
   // Generar rutas y widgets globales
   await writeFile(path.join(libDir, 'routes.dart'), generateRoutesDart(classNames), 'utf-8');
   await writeFile(path.join(widgetsDir, 'app_drawer.dart'), generateSidebarDart(classNames, appName), 'utf-8');
-  await writeFile(path.join(homeDir, 'home_page.dart'), generateHomePageDart(classNames, appName), 'utf-8');
+  // Usar nombre de paquete por defecto. Si quieres imports tipo "package:xxx/..." pasa el packageName
+  const packageName = 'com_example'; // <- cambiar/propagar desde orchestrator si tienes el package real
+  await writeFile(path.join(homeDir, 'home_page.dart'), generateHomePageDart(classNames, appName, packageName), 'utf-8');
 }
 
 /**
@@ -156,6 +158,7 @@ export async function generateConfiguration(
 
   // pubspec y main
   await writeFile(path.join(projectDir, 'pubspec.yaml'), generatePubspecYaml(packageName), 'utf-8');
+  // generateMainDart actualmente acepta 1 argumento (appName)
   await writeFile(path.join(libDir, 'main.dart'), generateMainDart(appName), 'utf-8');
 
   // Generar lib/config.dart pasando la URL (incluye puerto 8080)

@@ -5,41 +5,47 @@
  * @param appName - Nombre de la aplicación
  * @returns Código Dart del main.dart
  */
-export function generateMainDart(appName: string = 'Mi App'): string {
+export function generateMainDart(appName: string = 'Mi App', packageName: string = 'com_example'): string {
+  // color naranja cálido (puedes ajustar el hex)
+  const seedHex = '#FF8A65'; // naranja cálido (deep orange light)
   return `import 'package:flutter/material.dart';
+import 'config.dart';
 import 'routes.dart';
+import 'pages/home/home_page.dart';
 
-/// Punto de entrada de la aplicación
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  AppConfig.validateConfig();
   runApp(const MyApp());
 }
 
-/// Widget raíz de la aplicación
 class MyApp extends StatelessWidget {
   const MyApp({Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
+    final seedColor = const Color(0xFFFF8A65); // naranja cálido
     return MaterialApp(
       title: '${appName}',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        primarySwatch: Colors.blue,
         useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(seedColor: seedColor, brightness: Brightness.light),
+        primaryColor: seedColor,
         appBarTheme: const AppBarTheme(
           centerTitle: true,
-          elevation: 2,
+          foregroundColor: Colors.white,
         ),
-        // No usar 'const' aquí porque BorderRadius.circular no es const
-        cardTheme: CardThemeData(
-          elevation: 2,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-          ),
+        floatingActionButtonTheme: FloatingActionButtonThemeData(
+          backgroundColor: seedColor,
+          foregroundColor: Colors.white,
+        ),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(backgroundColor: seedColor),
         ),
       ),
-      initialRoute: '/',
-      routes: appRoutes,
+      home: const HomePage(),
+      routes: buildAppRoutes(),
     );
   }
 }

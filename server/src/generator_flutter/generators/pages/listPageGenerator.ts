@@ -55,10 +55,16 @@ class _${className}ListPageState extends State<${className}ListPage> {
   // Instancia del servicio que maneja la comunicación (API/local)
   final ${className}Service _service = ${className}Service();
 
-  // Estado local de la lista, indicador de carga y mensaje de error
+  // Estado local de la lista, indicador de carga y mensajes de error diferenciados
   List<${className}>? _items;
   bool _isLoading = true;
-  String? _errorMessage;
+
+  // Error ocurrido durante la carga inicial (no crítico: se muestra discretamente)
+  String? _loadErrorMessage;
+
+  // Error de operaciones de mutación (guardar/eliminar). Estas operaciones deben notificar
+  // al usuario con SnackBar o pantalla cuando corresponda.
+  String? _operationErrorMessage;
 
   @override
   void initState() {
@@ -71,14 +77,17 @@ class _${className}ListPageState extends State<${className}ListPage> {
   Future<void> _loadData() async {
     setState(() {
       _isLoading = true;
-      _errorMessage = null;
+      _loadErrorMessage = null;
+      _operationErrorMessage = null;
     });
     try {
       final items = await _service.list();
       setState(() { _items = items; _isLoading = false; });
     } catch (e) {
-      // Si hay error, lo guardamos para mostrar en UI
-      setState(() { _errorMessage = e.toString(); _isLoading = false; });
+      // Fallo en la carga inicial: dejamos la lista vacía y guardamos el mensaje,
+      // pero NO mostramos un error crítico. Permitimos reintento.
+      setState(() { _items = []; _loadErrorMessage = e.toString(); _isLoading = false; });
+      // opcional: debugPrint('Carga inicial ${lowerName} fallida: \$e');
     }
   }
 
@@ -107,23 +116,38 @@ class _${className}ListPageState extends State<${className}ListPage> {
         // Convertimos id a String por seguridad si es nullable
         await _service.delete(item.${idAttr.name}?.toString());
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('${className} eliminado correctamente')));
-        _loadData();
+        await _loadData();
       } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al eliminar: \$e')));
+        // Mostrar error de operación (Snackbar)
+        final msg = 'Error al eliminar: \$e';
+        setState(() { _operationErrorMessage = msg; });
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
       }
     }
   }
 
   /// Navega a la página de creación (FormPage). Si retorna true, recarga la lista.
+  /// Si la FormPage devolviera un mensaje de error (por convención), también lo mostramos.
   void _navigateToCreate() async {
     final result = await Navigator.push(context, MaterialPageRoute(builder: (context) => ${className}FormPage()));
-    if (result == true) _loadData();
+    if (result == true) {
+      await _loadData();
+    } else if (result is String && result.isNotEmpty) {
+      // convención: FormPage puede retornar String con mensaje de error al fallar guardar
+      setState(() { _operationErrorMessage = result; });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result)));
+    }
   }
 
   /// Navega a la página de edición pasando el item seleccionado
   void _navigateToEdit(${className} item) async {
     final result = await Navigator.push(context, MaterialPageRoute(builder: (context) => ${className}FormPage(item: item)));
-    if (result == true) _loadData();
+    if (result == true) {
+      await _loadData();
+    } else if (result is String && result.isNotEmpty) {
+      setState(() { _operationErrorMessage = result; });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result)));
+    }
   }
 
   @override
@@ -135,14 +159,32 @@ class _${className}ListPageState extends State<${className}ListPage> {
     );
   }
 
-  /// Construye el cuerpo de la pantalla con distintos estados (cargando, error, vacío o lista)
+  /// Construye el cuerpo de la pantalla con distintos estados (cargando, error no crítico, vacío o lista)
   Widget _buildBody() {
     if (_isLoading) return const Center(child: CircularProgressIndicator());
-    if (_errorMessage != null) return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [ const Icon(Icons.error_outline, size: 64, color: Colors.red), const SizedBox(height: 16), Text('Error: \$_errorMessage'), const SizedBox(height: 16), ElevatedButton(onPressed: _loadData, child: const Text('Reintentar')) ]));
 
+    // Si hubo fallo en la carga inicial, mostramos un mensaje discreto y opción reintentar,
+    // pero permitimos que el usuario cree nuevos elementos.
     if (_items == null || _items!.isEmpty) {
-      // Estado vacío: invitamos a crear el primer elemento
-      return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [ const Icon(Icons.inbox, size: 64, color: Colors.grey), const SizedBox(height: 16), const Text('No hay ${pluralName} registrados'), const SizedBox(height: 16), ElevatedButton(onPressed: _navigateToCreate, child: const Text('Crear el primero')) ]));
+      return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        if (_loadErrorMessage != null) ...[
+          const Icon(Icons.info_outline, size: 48, color: Colors.orange),
+          const SizedBox(height: 8),
+          const Text('No se pudieron cargar los datos. Puedes reintentar o crear uno nuevo.', textAlign: TextAlign.center),
+          const SizedBox(height: 8),
+          Text(_loadErrorMessage!, textAlign: TextAlign.center, style: const TextStyle(fontSize: 12, color: Colors.black54)),
+          const SizedBox(height: 12),
+          ElevatedButton(onPressed: _loadData, child: const Text('Reintentar')),
+          const SizedBox(height: 8),
+          ElevatedButton(onPressed: _navigateToCreate, child: const Text('Crear nuevo')),
+        ] else ...[
+          const Icon(Icons.inbox, size: 64, color: Colors.grey),
+          const SizedBox(height: 16),
+          const Text('No hay ${pluralName} registrados'),
+          const SizedBox(height: 16),
+          ElevatedButton(onPressed: _navigateToCreate, child: const Text('Crear el primero')),
+        ]
+      ]));
     }
 
     // Lista poblada: mostramos cada item en un Card con título, subtítulo y acciones
@@ -170,4 +212,5 @@ ${displayFields}
     );
   }
  }
-`;}
+`;
+}

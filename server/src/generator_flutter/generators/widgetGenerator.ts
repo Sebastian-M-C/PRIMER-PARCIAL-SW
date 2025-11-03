@@ -8,7 +8,8 @@
  */
 export function generateHomePageDart(
   classNames: string[],
-  appName: string = 'Mi App'
+  appName: string = 'Mi App',
+  packageName: string = 'com_example'
 ): string {
   const cards = classNames.map(className => {
     const lowerName = className.toLowerCase();
@@ -21,7 +22,7 @@ export function generateHomePageDart(
   }).join('\n');
 
   return `import 'package:flutter/material.dart';
-import '../widgets/app_drawer.dart';
+import 'package:${packageName}/widgets/app_drawer.dart';
 
 /// Página principal de la aplicación
 /// Muestra un dashboard con acceso rápido a todos los módulos
