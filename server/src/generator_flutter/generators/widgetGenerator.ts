@@ -12,7 +12,7 @@ export function generateHomePageDart(
   packageName: string = 'com_example'
 ): string {
   const cards = classNames.map(className => {
-    const lowerName = className.toLowerCase();
+    const lowerName = className.toLowerCase().replace(/[^\w]/g, '_');
     return `          _buildModuleCard(
             context,
             title: '${className}s',
@@ -32,8 +32,12 @@ class HomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // AppBar transparente para integrarse con el fondo y evitar franja blanca
       appBar: AppBar(
-        title: const Text('${appName}'),
+        title: Text('${appName}'),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        centerTitle: false,
       ),
       drawer: const AppDrawer(),
       body: Padding(

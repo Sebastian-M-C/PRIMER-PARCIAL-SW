@@ -32,9 +32,14 @@ class MyApp extends StatelessWidget {
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(seedColor: seedColor, brightness: Brightness.light),
         primaryColor: seedColor,
+        // fondo suave naranja claro para toda la app
+        scaffoldBackgroundColor: const Color(0xFFFFF3E6),
+        // AppBar transparente y sin elevación para evitar la franja blanca
         appBarTheme: const AppBarTheme(
-          centerTitle: true,
-          foregroundColor: Colors.white,
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          centerTitle: false,
+          foregroundColor: Colors.black87,
         ),
         floatingActionButtonTheme: FloatingActionButtonThemeData(
           backgroundColor: seedColor,
