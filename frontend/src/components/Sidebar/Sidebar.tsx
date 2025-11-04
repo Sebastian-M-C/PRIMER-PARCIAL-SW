@@ -15,7 +15,9 @@ export const Sidebar: React.FC = () => {
     selectedRelationId,
     getRelationById,
     updateRelation,
-    deleteRelation
+    deleteRelation,
+    generateDiagramFromAI,
+    applyUMLActions
   } = useDiagramStore();
 
   const selectedRelation = selectedRelationId ? getRelationById(selectedRelationId) : null;

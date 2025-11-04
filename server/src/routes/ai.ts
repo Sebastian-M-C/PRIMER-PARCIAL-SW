@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getAISuggestions, generateFromText } from '../ai/openaiService';
+import { getAISuggestions, generateFromText, generateDiagramFromText, modifyDiagramFromText } from '../ai/openaiService';
 
 const router = Router();
 
@@ -55,4 +55,61 @@ router.post('/from-text', async (req, res): Promise<void> => {
   }
 });
 
+router.post('/generate-diagram', async (req, res): Promise<void> => {
+  try {
+    const { text } = req.body;
+    
+    if (!text || typeof text !== 'string') {
+      res.status(400).json({ 
+        error: 'Invalid input. Required: text string' 
+      });
+      return;
+    }
+
+    console.log('Generating UML diagram from text:', text);
+    
+    const diagramResponse = await generateDiagramFromText(text);
+    
+    res.json(diagramResponse);
+
+  } catch (error) {
+    console.error('Error generating diagram from text:', error);
+    res.status(500).json({ 
+      error: 'Failed to generate UML diagram from text',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
 export { router as aiRoutes };
+
+// Nueva ruta: modificar diagrama a partir de texto + estado actual
+router.post('/modify-diagram', async (req, res): Promise<void> => {
+  try {
+    const { text, diagram } = req.body;
+
+    if (!text || typeof text !== 'string') {
+      res.status(400).json({ 
+        error: 'Invalid input. Required: text string' 
+      });
+      return;
+    }
+
+    if (!diagram || typeof diagram !== 'object') {
+      res.status(400).json({ 
+        error: 'Invalid input. Required: diagram object' 
+      });
+      return;
+    }
+
+    console.log('Modifying UML diagram from text');
+    const actionResponse = await modifyDiagramFromText(diagram, text);
+    res.json(actionResponse);
+  } catch (error) {
+    console.error('Error modifying diagram from text:', error);
+    res.status(500).json({ 
+      error: 'Failed to modify UML diagram from text',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
