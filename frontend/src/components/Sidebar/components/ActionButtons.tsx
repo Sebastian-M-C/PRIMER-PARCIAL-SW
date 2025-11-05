@@ -12,6 +12,8 @@ interface ActionButtonsProps {
   onAIGenerate: () => void;
   isGenerating: boolean;
   hasClasses: boolean;
+  // Nuevo: handler opcional para subir imagen (multipart). Recibe el change event del input file.
+  onUploadImage?: (event: React.ChangeEvent<HTMLInputElement>) => void;
 }
 
 export const ActionButtons: React.FC<ActionButtonsProps> = ({
@@ -25,6 +27,7 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
   onAIGenerate,
   isGenerating,
   hasClasses
+  , onUploadImage
 }) => {
   return (
     <div style={{
@@ -105,6 +108,33 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
           />
         </label>
       </div>
+
+      {/* Nuevo: Subir imagen para convertir a diagrama (IA) */}
+      <label style={{
+        marginTop: 8,
+        padding: '8px 12px',
+        backgroundColor: '#6c757d',
+        color: 'white',
+        border: 'none',
+        borderRadius: '4px',
+        cursor: onUploadImage ? 'pointer' : 'not-allowed',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        fontSize: '14px',
+        justifyContent: 'center'
+      }}
+      title="Subir imagen para convertir a diagrama (IA)"
+      >
+        <Upload size={16} />
+        Subir imagen
+        <input
+          type="file"
+          accept="image/*"
+          onChange={(e) => onUploadImage ? onUploadImage(e) : undefined}
+          style={{ display: 'none' }}
+        />
+      </label>
 
       {/* ✅ NUEVO: Generar Backend y Frontend */}
       <div style={{ display: 'flex', gap: '4px' }}>

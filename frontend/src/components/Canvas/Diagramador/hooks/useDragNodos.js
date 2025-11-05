@@ -22,11 +22,10 @@ export const useDragNodos = (referenciaStage, actualizarClase, diagrama) => {
    * Ahora recibe el evento con el nodo que fue arrastrado
    */
   const manejarFinArrastreNodo = useCallback((e) => {
-    console.log('🔵 FINALIZANDO ARRASTRE - Hook actualizado');
-
+   
     const nodo = e && e.target ? e.target : null;
     if (!nodo) {
-      console.log('🟡 No hay nodo para finalizar');
+      
       // Reactivar panning por seguridad
       setArrastrandoNodo(false);
       setStageArrastrable(true);
@@ -37,8 +36,7 @@ export const useDragNodos = (referenciaStage, actualizarClase, diagrama) => {
     const xFinal = typeof nodo.x === 'function' ? nodo.x() : nodo.attrs?.x;
     const yFinal = typeof nodo.y === 'function' ? nodo.y() : nodo.attrs?.y;
 
-    console.log('🔵 Nodo ID:', id);
-    console.log('🔵 Posición final:', { x: xFinal, y: yFinal });
+
 
     const clases = (diagrama && (diagrama.classes ?? diagrama.clases)) || [];
 
@@ -49,7 +47,7 @@ export const useDragNodos = (referenciaStage, actualizarClase, diagrama) => {
         const pos = { position: { x: Math.round(xFinal), y: Math.round(yFinal) } };
         try {
           actualizarClase(id, pos);
-          console.log('🟢 Posición actualizada en el store', pos);
+          
         } catch (err) {
           console.log('🔴 Error al llamar a actualizarClase', err);
         }
@@ -64,7 +62,6 @@ export const useDragNodos = (referenciaStage, actualizarClase, diagrama) => {
     setArrastrandoNodo(false);
     setStageArrastrable(true);
 
-    console.log('🟢 Arrastre finalizado correctamente');
   }, [actualizarClase, diagrama]);
 
   return {
