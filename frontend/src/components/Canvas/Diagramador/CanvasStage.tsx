@@ -4,6 +4,7 @@ import Konva from 'konva';
 import { UMLClass, UMLRelation, Diagram } from '../../../types/uml';
 import { ClassNode } from '../Clase/ClassNode';
 import { ConnectionLine } from '../../Canvas/Relaciones/ConnectionLine';
+import { ManyToManyVisual } from '../Relaciones/ManyToManyVisual';
 
 export interface CanvasStageProps {
   stageRef: React.RefObject<Konva.Stage>;
@@ -126,37 +127,108 @@ export const CanvasStage: React.FC<CanvasStageProps> = memo(({
         </Group>
 
         {/* Connection lines */}
-        {diagram?.relations.map((relation) => {
-          const sourceClass = diagram.classes.find(cls => cls.id === relation.source);
-          const targetClass = diagram.classes.find(cls => cls.id === relation.target);
-          if (!sourceClass || !targetClass) return null;
+        {(() => {
+          if (!diagram) return null;
 
-          return (
-            <ConnectionLine
-              key={relation.id}
-              relation={relation}
-              sourceClass={{
-                x: sourceClass.position.x,
-                y: sourceClass.position.y,
-                width: sourceClass.width,
-                height: sourceClass.height
-              }}
-              targetClass={{
-                x: targetClass.position.x,
-                y: targetClass.position.y,
-                width: targetClass.width,
-                height: targetClass.height
-              }}
-              isSelected={selectedRelationId === relation.id}
-              onClick={() => onRelationClick?.(relation.id)}
-              onContextMenu={(clientX, clientY, relId) => {
-                if (typeof onRelationContextMenu === 'function') {
-                  onRelationContextMenu(clientX, clientY, relId);
-                }
-              }}
-            />
-          );
-        })}
+          // Agrupar relaciones por target (posible clase "join")
+          const relationsByTarget = new Map<string, typeof diagram.relations>();
+          diagram.relations.forEach(r => {
+            const arr = relationsByTarget.get(r.target) || [];
+            arr.push(r);
+            relationsByTarget.set(r.target, arr);
+          });
+
+          // Detectar grupos join: target con exactamente 2 relaciones desde fuentes distintas
+          const manyToManyJoinGroups: {
+            joinId: string;
+            relA: typeof diagram.relations[0];
+            relB: typeof diagram.relations[0];
+          }[] = [];
+
+          relationsByTarget.forEach((rels, targetId) => {
+            if (rels.length === 2) {
+              const [r1, r2] = rels;
+              if (r1.source !== r2.source) {
+                manyToManyJoinGroups.push({ joinId: targetId, relA: r1, relB: r2 });
+              }
+            }
+          });
+
+          // Marcar relaciones que forman parte de los grupos para NO renderizarlas con ConnectionLine
+          const skippedRelationIds = new Set<string>();
+          manyToManyJoinGroups.forEach(g => {
+            skippedRelationIds.add(g.relA.id);
+            skippedRelationIds.add(g.relB.id);
+          });
+
+          const rendered: JSX.Element[] = [];
+
+          // Render ConnectionLine para relaciones normales (no parte de un join group)
+          diagram.relations.forEach((relation) => {
+            if (skippedRelationIds.has(relation.id)) return;
+            const sourceClass = diagram.classes.find(cls => cls.id === relation.source);
+            const targetClass = diagram.classes.find(cls => cls.id === relation.target);
+            if (!sourceClass || !targetClass) return;
+
+            rendered.push(
+              <ConnectionLine
+                key={relation.id}
+                relation={relation}
+                sourceClass={{
+                  x: sourceClass.position.x,
+                  y: sourceClass.position.y,
+                  width: sourceClass.width,
+                  height: sourceClass.height
+                }}
+                targetClass={{
+                  x: targetClass.position.x,
+                  y: targetClass.position.y,
+                  width: targetClass.width,
+                  height: targetClass.height
+                }}
+                isSelected={selectedRelationId === relation.id}
+                onClick={() => onRelationClick?.(relation.id)}
+                onContextMenu={(clientX, clientY, relId) => {
+                  if (typeof onRelationContextMenu === 'function') {
+                    onRelationContextMenu(clientX, clientY, relId);
+                  }
+                }}
+              />
+            );
+          });
+
+          // Render especial para cada grupo MANY_TO_MANY
+          manyToManyJoinGroups.forEach((g, idx) => {
+            const srcA = diagram.classes.find(c => c.id === g.relA.source);
+            const srcB = diagram.classes.find(c => c.id === g.relB.source);
+            const joinCls = diagram.classes.find(c => c.id === g.joinId);
+            if (!srcA || !srcB || !joinCls) return;
+
+            rendered.push(
+              <ManyToManyVisual
+                key={`m2m_${g.joinId}_${idx}`}
+                sourceA={{
+                  x: srcA.position.x, y: srcA.position.y, width: srcA.width, height: srcA.height
+                }}
+                sourceB={{
+                  x: srcB.position.x, y: srcB.position.y, width: srcB.width, height: srcB.height
+                }}
+                joinClassBox={{
+                  x: joinCls.position.x, y: joinCls.position.y, width: joinCls.width, height: joinCls.height
+                }}
+                // pasar cardinalidades desde las relaciones originales (opcional)
+                cardinalityA={g.relA.sourceCardinality}
+                cardinalityB={g.relB.sourceCardinality}
+                onContextMenu={(clientX, clientY) => {
+                  // abrir menú contextual para el join (si se desea)
+                  if (typeof onRelationContextMenu === 'function') onRelationContextMenu(clientX, clientY, g.relA.id);
+                }}
+              />
+            );
+          });
+
+          return rendered;
+        })()}
 
         {/* Temporary relation line while creating (smooth / tension + draggable handle) */}
         {isCreatingRelation && relationStart && tempEndPoint && (

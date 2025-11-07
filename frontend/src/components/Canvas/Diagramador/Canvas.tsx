@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import Konva from 'konva';
 import { useDiagramStore } from '../../../store/useDiagramStore';
-import { Diagram } from '../../../types/uml';
+import { Diagram, UMLClass,UMLRelation } from '../../../types/uml';
 import { RelationModal } from '../../Canvas/Relaciones/RelationModal';
 import { CanvasStage } from './CanvasStage';
 import { RelationContextMenu } from '../../Canvas/Relaciones/RelationContextMenu';
@@ -42,7 +42,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     selectRelation,
     updateClass,
     addRelation,
-    // <-- acciones del store: deleteRelation ya existe en useDiagramStore
+    addClass,
     deleteRelation,
     updateRelation
   } = useDiagramStore();
@@ -276,7 +276,80 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
             cancelarRelacion();
             setMostrarModalRelacion(false);
           }}
-          onConfirm={(relationData) => {
+          onConfirm={(relationData, joinConfig) => {
+            // MANY_TO_MANY -> crear clase intermedia proporcionada por joinConfig
+            if (relationData.type === 'MANY_TO_MANY' && joinConfig) {
+              const sourceId = relacionPendiente.sourceId;
+              const targetId = relacionPendiente.targetId;
+              const sourceCls = diagram?.classes?.find(c => c.id === sourceId);
+              const targetCls = diagram?.classes?.find(c => c.id === targetId);
+              if (!sourceCls || !targetCls) {
+                console.warn('Clases origen/target no encontradas.');
+                cancelarRelacion();
+                setMostrarModalRelacion(false);
+                return;
+              }
+
+              const genId = (prefix = '') => `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2,8)}`;
+              const joinId = genId('cls_');
+
+              // Mapear atributos del joinConfig a la estructura de UMLClass.attributes
+              const attributes = (joinConfig.attributes || []).map(attr => ({
+                name: attr.name,
+                type: attr.type || 'string'
+              }));
+
+              const joinClass: UMLClass = {
+                id: joinId,
+                name: joinConfig.name || `${sourceCls.name}_${targetCls.name}_DETALLE`,
+                attributes,
+                methods: [],
+                position: {
+                  x: ((sourceCls.position?.x ?? 0) + (targetCls.position?.x ?? 0)) / 2 + 20,
+                  y: ((sourceCls.position?.y ?? 0) + (targetCls.position?.y ?? 0)) / 2 + 20
+                },
+                width: 180,
+                height: 120
+              };
+
+              if (typeof addClass === 'function') addClass(joinClass);
+              else console.warn('addClass no disponible en useDiagramStore; implementa addClass.');
+
+              // Crear dos relaciones OneToMany hacia la clase intermedia
+              const rel1: Omit<UMLRelation, 'id'> = {
+                source: sourceId,
+                target: joinId,
+                type: 'ONE_TO_MANY',
+                sourceCardinality: '1',
+                targetCardinality: '0..*',
+                label: undefined,
+                mappedBy: undefined,
+                joinColumn: undefined
+              };
+              const rel2: Omit<UMLRelation, 'id'> = {
+                source: targetId,
+                target: joinId,
+                type: 'ONE_TO_MANY',
+                sourceCardinality: '1',
+                targetCardinality: '0..*',
+                label: undefined,
+                mappedBy: undefined,
+                joinColumn: undefined
+              };
+
+              if (typeof addRelation === 'function') {
+                addRelation(rel1);
+                addRelation(rel2);
+              } else {
+                console.warn('addRelation no disponible en useDiagramStore; implementa addRelation.');
+              }
+
+              cancelarRelacion();
+              setMostrarModalRelacion(false);
+              return;
+            }
+
+            // Caso normal
             confirmarRelacion(relationData);
             setMostrarModalRelacion(false);
           }}

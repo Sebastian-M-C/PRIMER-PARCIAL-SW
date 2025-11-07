@@ -71,7 +71,8 @@ interface DiagramState {
   selectClass: (id: string | null) => void;
   
   // Relation actions
-  addRelation: (relation: UMLRelation) => void;
+  // addRelation acepta tanto UMLRelation (con id) como Omit<UMLRelation,'id'> (se genera id)
+  addRelation: (relation: UMLRelation | Omit<UMLRelation, 'id'>) => void;
   updateRelation: (id: string, updates: Partial<UMLRelation>) => void;
   deleteRelation: (id: string) => void;
   selectRelation: (id: string | null) => void;
@@ -182,14 +183,21 @@ export const useDiagramStore = create<DiagramState>((set, get) => ({
 
   /**
    * addRelation
-   * Añade una nueva relación al diagrama. Si no hay diagrama, no hace nada.
+   * Añade una nueva relación al diagrama. Si el objeto no trae `id`, el store genera uno.
    */
-  addRelation: (relation) => set((state) => ({
-    diagram: state.diagram ? {
-      ...state.diagram,
-      relations: [...state.diagram.relations, relation]
-    } : null
-  })),
+  addRelation: (relation) => set((state) => {
+    if (!state.diagram) return { diagram: state.diagram };
+    const newRelation: UMLRelation = ('id' in relation && (relation as UMLRelation).id)
+      ? (relation as UMLRelation)
+      : { id: `rel_${Date.now().toString(36)}${Math.random().toString(36).slice(2,6)}`, ...(relation as Omit<UMLRelation, 'id'>) } as UMLRelation;
+
+    return {
+      diagram: {
+        ...state.diagram,
+        relations: [...state.diagram.relations, newRelation]
+      }
+    };
+  }),
   
   /**
    * updateRelation

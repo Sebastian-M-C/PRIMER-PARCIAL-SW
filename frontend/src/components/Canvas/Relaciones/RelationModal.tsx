@@ -1,12 +1,6 @@
-import React, { useState } from 'react';
-import { UMLRelation } from '../../../types/uml';
-import '../../style/RelationModal.css';
+import React, { useEffect, useState } from 'react';
+import { UMLRelation } from '../../types/uml';
 
-/**
- * Opciones de tipo de relación disponibles en el modal.
- * value: clave usada en el modelo / backend
- * label: texto visible para el usuario
- */
 const RELATION_TYPES = [
   { value: 'ONE_TO_ONE', label: 'Uno a Uno' },
   { value: 'ONE_TO_MANY', label: 'Uno a Muchos' },
@@ -17,9 +11,6 @@ const RELATION_TYPES = [
   { value: 'AGGREGATION', label: 'Agregación' }
 ];
 
-/**
- * Opciones de cardinalidad para los selectores de la UI.
- */
 const CARDINALITY_OPTIONS = [
   { value: '1', label: '1' },
   { value: '0..1', label: '0..1' },
@@ -28,65 +19,73 @@ const CARDINALITY_OPTIONS = [
   { value: '*', label: '*' }
 ];
 
-interface RelationModalProps {
-  /**
-   * Mostrar/ocultar modal
-   */
-  isOpen: boolean;
-  /**
-   * Cerrar modal (sin confirmar)
-   */
-  onClose: () => void;
-  /**
-   * Callback cuando el usuario confirma la creación de la relación.
-   * Recibe un objeto Omit<UMLRelation, 'id'> (el id lo genera el backend / store).
-   */
-  onConfirm: (relationData: Omit<UMLRelation, 'id'>) => void;
-  sourceClassId: string;
-  targetClassId: string;
-  sourceClassName: string;
-  targetClassName: string;
+interface JoinAttribute {
+  name: string;
+  type: string;
 }
 
-/**
- * RelationModal
- *
- * Componente que muestra un formulario para crear/editar relaciones UML entre dos clases.
- * - Controlado externamente mediante isOpen/onClose.
- * - Al confirmar invoca onConfirm con los datos necesarios (sin id).
- *
- * Estado local:
- * - type: tipo de relación (ONE_TO_ONE, etc.)
- * - sourceCardinality / targetCardinality: cardinalidades seleccionadas
- * - label / mappedBy / joinColumn: campos opcionales de la relación
- */
+interface RelationModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  /**
+   * Ahora onConfirm recibe optional joinConfig cuando type === 'MANY_TO_MANY'
+   */
+  onConfirm: (
+    relationData: Omit<UMLRelation, 'id'>,
+    joinConfig?: { name: string; attributes: JoinAttribute[] }
+  ) => void;
+  sourceClassId: string;
+  targetClassId?: string;
+  sourceClassName?: string;
+  targetClassName?: string;
+}
+
 export const RelationModal: React.FC<RelationModalProps> = ({
   isOpen,
   onClose,
   onConfirm,
   sourceClassId,
   targetClassId,
-  sourceClassName,
-  targetClassName
+  sourceClassName = '',
+  targetClassName = ''
 }) => {
-  const [type, setType] = useState<UMLRelation['type']>('ONE_TO_ONE');
-  const [sourceCardinality, setSourceCardinality] = useState('1');
-  const [targetCardinality, setTargetCardinality] = useState('1');
-  const [label, setLabel] = useState('');
-  const [mappedBy, setMappedBy] = useState('');
-  const [joinColumn, setJoinColumn] = useState('');
+  const [type, setType] = useState<string>('ONE_TO_ONE');
+  const [sourceCardinality, setSourceCardinality] = useState<string>('1');
+  const [targetCardinality, setTargetCardinality] = useState<string>('1');
+  const [label, setLabel] = useState<string>('');
+  const [mappedBy, setMappedBy] = useState<string>('');
+  const [joinColumn, setJoinColumn] = useState<string>('');
 
-  /**
-   * handleSubmit
-   * - Evita el comportamiento por defecto del form.
-   * - Construye el objeto de relación (sin id) y llama a onConfirm.
-   * - Cierra el modal con onClose.
-   */
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const [joinName, setJoinName] = useState<string>('');
+  const [joinAttributes, setJoinAttributes] = useState<JoinAttribute[]>(
+    [{ name: 'id', type: 'int' }]
+  );
+
+  useEffect(() => {
+    if (!isOpen) {
+      setType('ONE_TO_ONE');
+      setSourceCardinality('1');
+      setTargetCardinality('1');
+      setLabel('');
+      setMappedBy('');
+      setJoinColumn('');
+      setJoinName('');
+      setJoinAttributes([{ name: 'id', type: 'int' }]);
+    }
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  const handleAddAttribute = () => setJoinAttributes(prev => [...prev, { name: '', type: 'string' }]);
+  const handleRemoveAttribute = (index: number) => setJoinAttributes(prev => prev.filter((_, i) => i !== index));
+  const handleAttributeChange = (index: number, key: 'name' | 'type', value: string) =>
+    setJoinAttributes(prev => prev.map((a, i) => i === index ? { ...a, [key]: value } : a));
+
+  const handleSubmit = (e?: React.FormEvent) => {
+    e?.preventDefault();
     const relationData: Omit<UMLRelation, 'id'> = {
       source: sourceClassId,
-      target: targetClassId,
+      target: targetClassId || '',
       type,
       sourceCardinality,
       targetCardinality,
@@ -94,130 +93,177 @@ export const RelationModal: React.FC<RelationModalProps> = ({
       mappedBy: mappedBy || undefined,
       joinColumn: joinColumn || undefined
     };
-    onConfirm(relationData);
+
+    if (type === 'MANY_TO_MANY') {
+      const joinConfig = {
+        name: joinName || `${sourceClassName}_${targetClassName}_DETALLE`,
+        attributes: joinAttributes.filter(a => a.name.trim() !== '')
+      };
+      onConfirm(relationData, joinConfig);
+    } else {
+      onConfirm(relationData);
+    }
     onClose();
   };
 
-  // Si el modal está cerrado no renderizamos nada.
-  if (!isOpen) return null;
+  // Warm orange theme + readable black text
+  const overlayStyle: React.CSSProperties = {
+    position: 'fixed',
+    inset: 0,
+    background: 'rgba(0,0,0,0.35)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10000
+  };
+
+  const boxStyle: React.CSSProperties = {
+    width: 520,
+    maxHeight: '85vh',
+    overflowY: 'auto',
+    background: 'linear-gradient(180deg,#fff8f0,#fff4ee)',
+    borderRadius: 10,
+    padding: 20,
+    boxShadow: '0 14px 40px rgba(0,0,0,0.25)',
+    border: '1px solid rgba(255,140,40,0.18)',
+    boxSizing: 'border-box'
+  };
+
+  const labelStyle: React.CSSProperties = { display: 'block', marginBottom: 6, fontSize: 13, color: '#111' };
+  const inputStyle: React.CSSProperties = {
+    width: '100%',
+    padding: '8px 10px',
+    borderRadius: 8,
+    border: '1px solid #f0a95a',
+    boxSizing: 'border-box',
+    fontSize: 14,
+    background: '#fff',
+    color: '#111'
+  };
+  const smallInputStyle: React.CSSProperties = { ...inputStyle, width: 120 };
+  const headerStyle: React.CSSProperties = { margin: 0, marginBottom: 12, fontSize: 18, color: '#b44f00' };
+  const footerStyle: React.CSSProperties = { display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 14 };
+
+  const neutralButtonStyle: React.CSSProperties = {
+    padding: '8px 12px',
+    borderRadius: 8,
+    background: '#fff',
+    border: '1px solid rgba(180,120,80,0.25)',
+    color: '#111',
+    cursor: 'pointer'
+  };
+
+  const confirmButtonStyle: React.CSSProperties = {
+    padding: '8px 14px',
+    borderRadius: 8,
+    background: '#ff7a18',
+    color: '#fff',
+    border: 'none',
+    cursor: 'pointer'
+  };
 
   return (
-    <div
-      className="relation-modal-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="relation-modal-title"
-    >
-      <div className="relation-modal" tabIndex={-1}>
-        {/* Header: título y botón de cierre */}
-        <div className="relation-modal-header">
-          <h2 id="relation-modal-title" className="relation-modal-title">
-            Crear Relación: {sourceClassName} → {targetClassName}
-          </h2>
-          <button className="relation-close" onClick={onClose} aria-label="Cerrar diálogo">
-            ×
-          </button>
-        </div>
+    <div style={overlayStyle} role="dialog" aria-modal="true">
+      <div style={boxStyle}>
+        <h3 style={headerStyle}>Crear / Editar relación</h3>
 
-        {/* Body: formulario con campos para tipo, cardinalidades y metadatos */}
-        <div className="relation-modal-body">
-          <form onSubmit={handleSubmit}>
-            {/* Tipo de relación */}
-            <div className="field">
-              <label className="field-label">Tipo de Relación</label>
-              <select
-                className="field-select"
-                value={type}
-                onChange={(e) => setType(e.target.value as UMLRelation['type'])}
-              >
-                {RELATION_TYPES.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
+        <form onSubmit={handleSubmit}>
+          <div style={{ marginBottom: 12 }}>
+            <label style={labelStyle}>Tipo</label>
+            <select value={type} onChange={e => setType(e.target.value)} style={inputStyle}>
+              {RELATION_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+          </div>
+
+          <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+            <div style={{ flex: 1 }}>
+              <label style={labelStyle}>Cardinalidad origen ({sourceClassName || 'origen'})</label>
+              <select value={sourceCardinality} onChange={e => setSourceCardinality(e.target.value)} style={inputStyle}>
+                {CARDINALITY_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
+            <div style={{ flex: 1 }}>
+              <label style={labelStyle}>Cardinalidad destino ({targetClassName || 'destino'})</label>
+              <select value={targetCardinality} onChange={e => setTargetCardinality(e.target.value)} style={inputStyle}>
+                {CARDINALITY_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+          </div>
 
-            {/* Cardinalidades: origen y destino */}
-            <div className="row" style={{ marginBottom: 12 }}>
-              <div className="flex field">
-                <label className="field-label">{sourceClassName} Cardinality</label>
-                <select
-                  className="field-select"
-                  value={sourceCardinality}
-                  onChange={(e) => setSourceCardinality(e.target.value)}
-                >
-                  {CARDINALITY_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
+          <div style={{ marginBottom: 12 }}>
+            <label style={labelStyle}>Etiqueta (opcional)</label>
+            <input value={label} onChange={e => setLabel(e.target.value)} style={inputStyle} />
+          </div>
+
+          {type === 'MANY_TO_MANY' && (
+            <div style={{ marginTop: 8, paddingTop: 10, borderTop: '1px solid rgba(255,140,40,0.08)' }}>
+              <h4 style={{ margin: '6px 0 10px 0', color: '#9a3d00' }}>Clase intermedia</h4>
+
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Nombre de la clase intermedia</label>
+                <input
+                  value={joinName}
+                  onChange={e => setJoinName(e.target.value)}
+                  placeholder={`${sourceClassName}_${targetClassName}_DETALLE`}
+                  style={inputStyle}
+                />
               </div>
 
-              <div className="flex field">
-                <label className="field-label">{targetClassName} Cardinality</label>
-                <select
-                  className="field-select"
-                  value={targetCardinality}
-                  onChange={(e) => setTargetCardinality(e.target.value)}
-                >
-                  {CARDINALITY_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
+              <div>
+                <label style={labelStyle}>Atributos</label>
+                {joinAttributes.map((attr, idx) => (
+                  <div key={idx} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+                    <input
+                      value={attr.name}
+                      onChange={e => handleAttributeChange(idx, 'name', e.target.value)}
+                      placeholder="nombre"
+                      style={{ ...inputStyle, flex: 1 }}
+                    />
+                    <input
+                      value={attr.type}
+                      onChange={e => handleAttributeChange(idx, 'type', e.target.value)}
+                      placeholder="tipo"
+                      style={smallInputStyle}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveAttribute(idx)}
+                      style={{ background: 'transparent', border: 'none', color: '#c53030', cursor: 'pointer' }}
+                    >
+                      Eliminar
+                    </button>
+                  </div>
+                ))}
+
+                <div style={{ marginTop: 6 }}>
+                  <button
+                    type="button"
+                    onClick={handleAddAttribute}
+                    style={{
+                      padding: '6px 10px',
+                      borderRadius: 8,
+                      background: '#fff8f0',
+                      border: '1px solid #ffd6b3',
+                      cursor: 'pointer',
+                      color: '#7a3f00'
+                    }}
+                  >
+                    Añadir atributo
+                  </button>
+                </div>
               </div>
             </div>
+          )}
 
-            {/* Etiqueta opcional */}
-            <div className="field">
-              <label className="field-label">Etiqueta (opcional)</label>
-              <input
-                className="field-input"
-                type="text"
-                value={label}
-                onChange={(e) => setLabel(e.target.value)}
-                placeholder="ej: posee, contiene, usa"
-              />
-            </div>
-
-            {/* MappedBy opcional (para relaciones bidireccionales en JPA) */}
-            <div className="field">
-              <label className="field-label">Mapeado Por (opcional)</label>
-              <input
-                className="field-input"
-                type="text"
-                value={mappedBy}
-                onChange={(e) => setMappedBy(e.target.value)}
-                placeholder="Nombre del campo en la clase destino"
-              />
-            </div>
-
-            {/* Join column opcional para relaciones con FK */}
-            <div className="field" style={{ marginBottom: 16 }}>
-              <label className="field-label">Columna de Unión (opcional)</label>
-              <input
-                className="field-input"
-                type="text"
-                value={joinColumn}
-                onChange={(e) => setJoinColumn(e.target.value)}
-                placeholder="Nombre de la columna en la base de datos"
-              />
-            </div>
-
-            {/* Footer: acciones del modal */}
-            <div className="relation-modal-footer">
-              <button type="button" className="btn btn-ghost" onClick={onClose}>
-                Cancelar
-              </button>
-              <button type="submit" className="btn btn-primary">
-                Crear Relación
-              </button>
-            </div>
-          </form>
-        </div>
+          <div style={footerStyle}>
+            <button type="button" onClick={onClose} style={neutralButtonStyle}>
+              Cancelar
+            </button>
+            <button type="submit" style={confirmButtonStyle}>
+              Confirmar
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
