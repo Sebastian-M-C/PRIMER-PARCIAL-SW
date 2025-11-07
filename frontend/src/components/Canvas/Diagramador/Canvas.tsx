@@ -1,9 +1,10 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import Konva from 'konva';
 import { useDiagramStore } from '../../../store/useDiagramStore';
 import { Diagram } from '../../../types/uml';
-import { RelationModal } from '../../RelationModal';
+import { RelationModal } from '../../Canvas/Relaciones/RelationModal';
 import { CanvasStage } from './CanvasStage';
+import { RelationContextMenu } from '../../Canvas/Relaciones/RelationContextMenu';
 
 // Importar hooks personalizados
 import { useZoomPan } from './hooks/useZoomPan';
@@ -30,6 +31,7 @@ interface CanvasProps {
 export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
   // --- Referencias ---
   const referenciaStage = useRef<Konva.Stage>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
   // --- Store del diagrama ---
   const {
@@ -39,11 +41,25 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     selectClass,
     selectRelation,
     updateClass,
-    addRelation
+    addRelation,
+    // <-- acciones del store: deleteRelation ya existe en useDiagramStore
+    deleteRelation,
+    updateRelation
   } = useDiagramStore();
+  
+  // Estado para menú contextual de relaciones
+  const [relationContextMenu, setRelationContextMenu] = useState<{
+    open: boolean;
+    x: number;
+    y: number;
+    relationId?: string | null;
+  }>({ open: false, x: 0, y: 0, relationId: null });
+
+  // Estado para edición de relación (abre RelationModal en modo edición)
+  const [editRelationId, setEditRelationId] = useState<string | null>(null);
+  const [editModalOpen, setEditModalOpen] = useState(false);
 
   // --- Hooks personalizados ---
-  
   /**
    * Hook para manejar zoom y navegación
    */
@@ -60,7 +76,6 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
    */
   const {
     manejarSeleccionClase,
-    manejarSeleccionRelacion,
     manejarClickStage: manejarClickStageSeleccion
   } = useSeleccionElementos(
     selectClass,
@@ -71,7 +86,6 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
 
   /**
    * Hook para manejar creación de relaciones
-   * -- NOTE: ahora pasamos referenciaStage para que el hook pueda forzar stopDrag/dispatch mouseup
    */
   const {
     creandoRelacion,
@@ -87,34 +101,56 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     cancelarRelacion,
     obtenerNombresClases,
     setMostrarModalRelacion,
-    connectionTension, // <-- existente
-    actualizarPuntoFinal // <-- nuevo exportado desde el hook
-  } = useCreacionRelaciones(addRelation, diagram?.classes || [], referenciaStage); // <-- referenciaStage añadido
+    connectionTension,
+    actualizarPuntoFinal
+  } = useCreacionRelaciones(addRelation, diagram?.classes || [], referenciaStage);
 
   /**
    * Hook para manejar arrastre de nodos
    */
   const {
-    arrastrandoNodo,
     stageArrastrable,
     manejarInicioArrastreNodo,
     manejarFinArrastreNodo
   } = useDragNodos(referenciaStage, updateClass, diagram);
 
-  // --- Handlers combinados ---
+  // --- Handlers del menú contextual ---
+  const openRelationContextMenu = (clientX: number, clientY: number, relationId: string) => {
+    // calcular posición relativa al contenedor para posicionar el menú dentro del canvas
+    const rect = containerRef.current?.getBoundingClientRect();
+    const x = rect ? clientX - rect.left : clientX;
+    const y = rect ? clientY - rect.top : clientY;
 
-  /**
-   * Maneja el click en una clase combinando lógica de selección y creación de relaciones
-   */
+    setRelationContextMenu({ open: true, x, y, relationId });
+  };
+
+  const closeRelationContextMenu = () => {
+    setRelationContextMenu({ open: false, x: 0, y: 0, relationId: null });
+  };
+
+  const handleDeleteRelation = (relationId?: string | null) => {
+    if (!relationId) return;
+    if (typeof deleteRelation === 'function') {
+      deleteRelation(relationId);
+    } else {
+      console.warn('deleteRelation no disponible en useDiagramStore; implementar acción en el store.');
+    }
+    closeRelationContextMenu();
+  };
+
+  const handleEditRelation = (relationId?: string | null) => {
+    if (!relationId) return;
+    setEditRelationId(relationId);
+    setEditModalOpen(true);
+    closeRelationContextMenu();
+  };
+
+  // --- Handlers combinados ---
   const manejarClickClaseCombinado = (idClase: string) => {
     manejarClickClase(idClase, manejarSeleccionClase);
   };
 
-  /**
-   * Maneja el click en el stage combinando lógica de selección y creación de relaciones
-   */
   const manejarClickStageCombinado = (e: Konva.KonvaEventObject<MouseEvent>) => {
-    // Combinar lógica de selección y relaciones
     if (creandoRelacion) {
       manejarClickStageRelaciones(e, selectClass);
     } else {
@@ -125,7 +161,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
   // --- Render condicional por dimensiones inválidas ---
   if (!width || !height || width <= 0 || height <= 0) {
     return (
-      <div className="canvas-container" style={{ width, height, position: 'relative' }}>
+      <div ref={containerRef} className="canvas-container" style={{ width, height, position: 'relative' }}>
         <div style={{
           display: 'flex',
           alignItems: 'center',
@@ -141,14 +177,19 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     );
   }
 
-  // --- Obtener nombres para el modal ---
-  const { nombreOrigen, nombreDestino } = relacionPendiente 
-    ? obtenerNombresClases() 
+  // --- Obtener nombres para el modal de nueva relación ---
+  const { nombreOrigen, nombreDestino } = relacionPendiente
+    ? obtenerNombresClases()
     : { nombreOrigen: 'Desconocido', nombreDestino: 'Desconocido' };
+
+  // Obtener relación a editar (si hay)
+  const relationToEdit = editRelationId ? diagram?.relations?.find(r => r.id === editRelationId) : undefined;
+  const editSourceName = relationToEdit ? diagram?.classes?.find(c => c.id === relationToEdit.source)?.name ?? 'Desconocido' : '';
+  const editTargetName = relationToEdit ? diagram?.classes?.find(c => c.id === relationToEdit.target)?.name ?? 'Desconocido' : '';
 
   // --- JSX principal ---
   return (
-    <div className="canvas-container" style={{ width, height, position: 'relative' }}>
+    <div ref={containerRef} className="canvas-container" style={{ width, height, position: 'relative' }}>
       {/* Stage del lienzo */}
       <CanvasStage
         stageRef={referenciaStage}
@@ -175,8 +216,22 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
         onNodeDragEnd={manejarFinArrastreNodo}
         onConnectionStart={iniciarConexion}
 
+        // nuevo: pasar handler para abrir menú contextual desde ConnectionLine
+        onRelationContextMenu={openRelationContextMenu}
+        onRelationClick={selectRelation}
+        
         // <-- nuevo: indicar si debemos desactivar el drag de nodos globalmente
         disableNodesDragging={mostrarModalRelacion}
+      />
+
+      {/* Menú contextual para relaciones (absoluto dentro del contenedor) */}
+      <RelationContextMenu
+        x={relationContextMenu.x}
+        y={relationContextMenu.y}
+        isOpen={relationContextMenu.open}
+        onClose={closeRelationContextMenu}
+        onEdit={() => handleEditRelation(relationContextMenu.relationId)}
+        onDelete={() => handleDeleteRelation(relationContextMenu.relationId)}
       />
 
       {/* Controles de vista */}
@@ -213,7 +268,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
         </div>
       </div>
 
-      {/* Modal de relación */}
+      {/* Modal de relación (creación) */}
       {mostrarModalRelacion && relacionPendiente && (
         <RelationModal
           isOpen={mostrarModalRelacion}
@@ -229,6 +284,30 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
           targetClassId={relacionPendiente.targetId}
           sourceClassName={nombreOrigen}
           targetClassName={nombreDestino}
+        />
+      )}
+
+      {/* Modal de relación (edición) */}
+      {editModalOpen && relationToEdit && (
+        <RelationModal
+          isOpen={editModalOpen}
+          onClose={() => {
+            setEditModalOpen(false);
+            setEditRelationId(null);
+          }}
+          onConfirm={(relationData) => {
+            if (typeof updateRelation === 'function' && editRelationId) {
+              updateRelation(editRelationId, { ...relationData, id: editRelationId });
+            } else {
+              console.warn('updateRelation no disponible en useDiagramStore; implementar acción en el store.');
+            }
+            setEditModalOpen(false);
+            setEditRelationId(null);
+          }}
+          sourceClassId={relationToEdit.source}
+          targetClassId={relationToEdit.target}
+          sourceClassName={editSourceName}
+          targetClassName={editTargetName}
         />
       )}
     </div>

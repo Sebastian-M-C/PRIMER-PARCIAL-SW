@@ -1,7 +1,7 @@
 import React from 'react';
 import { Line, Group, Text, Circle } from 'react-konva';
 import { UMLRelation } from '../../types/uml';
-import { PRIMARY_START, PRIMARY_DARK } from '../style/theme';
+import { PRIMARY_START, PRIMARY_DARK } from '../../style/theme';
 
 interface ConnectionLineProps {
   /**
@@ -24,6 +24,11 @@ interface ConnectionLineProps {
    * Callback opcional cuando se hace click sobre la relación
    */
   onClick?: () => void;
+  /**
+   * Nuevo: callback para menú contextual.
+   * Recibe coordenadas cliente (px) y el id de la relación.
+   */
+  onContextMenu?: (clientX: number, clientY: number, relationId: string) => void;
 }
 
 /**
@@ -46,7 +51,8 @@ export const ConnectionLine: React.FC<ConnectionLineProps> = ({
   sourceClass,
   targetClass,
   isSelected = false,
-  onClick
+  onClick,
+  onContextMenu
 }) => {
   /**
    * Devuelve estilo (color, grosor, dash) según el tipo de relación.
@@ -125,8 +131,20 @@ export const ConnectionLine: React.FC<ConnectionLineProps> = ({
   const cardinalityFontSize = 13;
   const labelFontSize = 12;
 
+  // Manejo del evento de contexto (click derecho)
+  const handleContextMenu = (e: any) => {
+    // evitar menú del navegador dentro del canvas
+    e.evt.preventDefault();
+    if (onContextMenu) {
+      // obtener coordenadas del cliente desde el evento nativo
+      const clientX = e.evt.clientX;
+      const clientY = e.evt.clientY;
+      onContextMenu(clientX, clientY, relation.id);
+    }
+  };
+
   return (
-    <Group onClick={onClick}>
+    <Group onClick={onClick} onContextMenu={handleContextMenu}>
       {/* Línea principal entre los puntos calculados */}
       <Line
         points={[startPoint.x, startPoint.y, endPoint.x, endPoint.y]}

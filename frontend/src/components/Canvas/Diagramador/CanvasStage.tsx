@@ -3,9 +3,9 @@ import { Stage, Layer, Group, Line, Circle } from 'react-konva';
 import Konva from 'konva';
 import { UMLClass, UMLRelation, Diagram } from '../../../types/uml';
 import { ClassNode } from '../Clase/ClassNode';
-import { ConnectionLine } from '../ConnectionLine';
+import { ConnectionLine } from '../../Canvas/Relaciones/ConnectionLine';
 
-interface CanvasStageProps {
+export interface CanvasStageProps {
   stageRef: React.RefObject<Konva.Stage>;
   width: number;
   height: number;
@@ -31,8 +31,10 @@ interface CanvasStageProps {
   onConnectionStart: (classId: string, x: number, y: number) => void;
   onHandleDragMove?: (pos: { x: number; y: number }) => void;
 
-  // <-- nuevo prop para desactivar draggable en los nodos cuando corresponda
-  disableNodesDragging?: boolean;
+  // nuevo: handler para menú contextual de relaciones (cliente coords + relationId)
+  onRelationContextMenu?: (clientX: number, clientY: number, relationId: string) => void;
+  // nuevo: handler para click sobre una relación (seleccionar/editar)
+  onRelationClick?: (relationId: string) => void;
 }
 
 export const CanvasStage: React.FC<CanvasStageProps> = memo(({
@@ -59,7 +61,10 @@ export const CanvasStage: React.FC<CanvasStageProps> = memo(({
   onNodeDragEnd,
   onConnectionStart,
   onHandleDragMove,
-  disableNodesDragging = false // <-- default false
+  // Asegurarse de incluir las props nuevas aquí
+  disableNodesDragging = false,
+  onRelationContextMenu,
+  onRelationClick,
 }) => {
 
   const pointerToStageCoords = (stage: Konva.Stage | null) => {
@@ -143,7 +148,12 @@ export const CanvasStage: React.FC<CanvasStageProps> = memo(({
                 height: targetClass.height
               }}
               isSelected={selectedRelationId === relation.id}
-              onClick={() => onClassClick(relation.id)}
+              onClick={() => onRelationClick?.(relation.id)}
+              onContextMenu={(clientX, clientY, relId) => {
+                if (typeof onRelationContextMenu === 'function') {
+                  onRelationContextMenu(clientX, clientY, relId);
+                }
+              }}
             />
           );
         })}

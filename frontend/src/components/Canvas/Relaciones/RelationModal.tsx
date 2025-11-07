@@ -1,7 +1,6 @@
-
 import React, { useState } from 'react';
-import { UMLRelation } from '../types/uml';
-import './style/RelationModal.css';
+import { UMLRelation } from '../../../types/uml';
+import '../../style/RelationModal.css';
 
 /**
  * Opciones de tipo de relación disponibles en el modal.
@@ -85,18 +84,16 @@ export const RelationModal: React.FC<RelationModalProps> = ({
    */
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-
     const relationData: Omit<UMLRelation, 'id'> = {
-      type,
       source: sourceClassId,
       target: targetClassId,
+      type,
       sourceCardinality,
       targetCardinality,
       label: label || undefined,
       mappedBy: mappedBy || undefined,
       joinColumn: joinColumn || undefined
     };
-
     onConfirm(relationData);
     onClose();
   };
