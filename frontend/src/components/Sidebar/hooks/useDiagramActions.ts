@@ -100,31 +100,48 @@ export function useDiagramActions() {
   };
 
   /**
-   * Exportar diagrama como JSON
+   * Exportar diagrama como JSON (incluye clases con id y relaciones mapeadas por id y nombre)
    */
   const handleExportUML = () => {
     if (!diagram) return;
 
-    const umlJson = {
-      package: diagram.package,
-      classes: diagram.classes.map(cls => ({
-        name: cls.name,
-        attributes: cls.attributes,
-        methods: cls.methods,
-        position: cls.position, // ✅ Ahora incluye posición
-        width: cls.width,
-        height: cls.height
-      })),
-      relations: diagram.relations.map(rel => ({
+    const classesForExport = diagram.classes.map(cls => ({
+      id: cls.id,
+      name: cls.name,
+      attributes: cls.attributes || [],
+      methods: cls.methods || [],
+      position: cls.position || { x: 0, y: 0 },
+      width: cls.width || 200,
+      height: cls.height || 100
+    }));
+
+    const relationsForExport = (diagram.relations || []).map(rel => {
+      const sourceClass = diagram.classes.find(c => c.id === rel.source) || diagram.classes.find(c => c.name === rel.source);
+      const targetClass = diagram.classes.find(c => c.id === rel.target) || diagram.classes.find(c => c.name === rel.target);
+
+      return {
+        id: rel.id || `relation-${Date.now()}`,
         type: rel.type,
-        source: rel.source,
-        target: rel.target,
-        sourceCardinality: rel.sourceCardinality,
-        targetCardinality: rel.targetCardinality,
-        mappedBy: rel.mappedBy,
-        joinColumn: rel.joinColumn,
-        label: rel.label
-      }))
+        sourceId: sourceClass?.id || rel.source,
+        sourceName: sourceClass?.name || rel.sourceName || sourceClass?.id || rel.source,
+        targetId: targetClass?.id || rel.target,
+        targetName: targetClass?.name || rel.targetName || targetClass?.id || rel.target,
+        sourceCardinality: rel.sourceCardinality || null,
+        targetCardinality: rel.targetCardinality || null,
+        mappedBy: rel.mappedBy || null,
+        joinColumn: rel.joinColumn || null,
+        label: rel.label || null
+      };
+    });
+
+    const umlJson = {
+      id: diagram.id || `diagram-${Date.now()}`,
+      name: diagram.name || 'Diagrama UML',
+      package: diagram.package || 'com.example',
+      createdAt: diagram.createdAt || new Date(),
+      updatedAt: diagram.updatedAt || new Date(),
+      classes: classesForExport,
+      relations: relationsForExport
     };
 
     const blob = new Blob([JSON.stringify(umlJson, null, 2)], { type: 'application/json' });
@@ -153,21 +170,55 @@ export function useDiagramActions() {
           throw new Error('Formato de UML inválido: falta "classes"');
         }
 
-        // Generar IDs si no existen y asegurar posiciones
-        const importedDiagram = {
-          id: diagram?.id || 'imported-diagram',
-          name: umlJson.name || 'Diagrama Importado',
-          package: umlJson.package || 'com.example',
-          classes: umlJson.classes.map((cls: any, index: number) => ({
+        // Mapear IDs/nombres originales a nuevos IDs generados
+        const idMap: Record<string, string> = {};
+        const nameMap: Record<string, string> = {};
+
+        const importedClasses = umlJson.classes.map((cls: any, index: number) => {
+          const originalIdKey = cls.id || cls.name || `original-${index}`;
+          const newId = cls.id || `imported-class-${Date.now()}-${index}`;
+          idMap[originalIdKey] = newId;
+          if (cls.name) nameMap[cls.name] = newId;
+
+          return {
             ...cls,
-            id: cls.id || `imported-class-${Date.now()}-${index}`,
+            id: newId,
             position: cls.position || { x: 100 + (index * 250), y: 100 },
             width: cls.width || 200,
             height: cls.height || 100,
             attributes: cls.attributes || [],
             methods: cls.methods || []
-          })),
-          relations: umlJson.relations || [],
+          };
+        });
+
+        // Procesar relaciones y re-mapear source/target usando los mapeos anteriores.
+        const importedRelations = (umlJson.relations || []).map((rel: any, index: number) => {
+          const sourceKey = rel.source || rel.sourceClass || rel.sourceName;
+          const targetKey = rel.target || rel.targetClass || rel.targetName;
+
+          const mappedSource = idMap[sourceKey] || nameMap[sourceKey] || rel.source;
+          const mappedTarget = idMap[targetKey] || nameMap[targetKey] || rel.target;
+
+          return {
+            ...rel,
+            id: rel.id || `imported-relation-${Date.now()}-${index}`,
+            source: mappedSource,
+            target: mappedTarget,
+            // asegurar campos opcionales
+            sourceCardinality: rel.sourceCardinality || rel.sourceCardinality,
+            targetCardinality: rel.targetCardinality || rel.targetCardinality,
+            mappedBy: rel.mappedBy || rel.mappedBy,
+            joinColumn: rel.joinColumn || rel.joinColumn,
+            label: rel.label || rel.label
+          };
+        });
+
+        const importedDiagram = {
+          id: diagram?.id || 'imported-diagram',
+          name: umlJson.name || 'Diagrama Importado',
+          package: umlJson.package || 'com.example',
+          classes: importedClasses,
+          relations: importedRelations,
           createdAt: new Date(),
           updatedAt: new Date()
         };
