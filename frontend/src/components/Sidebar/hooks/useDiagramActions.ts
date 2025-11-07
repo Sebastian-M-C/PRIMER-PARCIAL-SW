@@ -1,14 +1,142 @@
+import type { ChangeEvent } from 'react';
 import { useDiagramStore } from '../../../store/useDiagramStore';
 import { findFreePosition, generateUniqueClassName } from '../utils/positionFinder';
+import { serializeDiagram } from './diagramSerializer';
+import type { UMLDiagram, UMLClass, UMLRelation } from '../../../../types/uml';
+
+/**
+ * importUMLFromString
+ *
+ * Función auxiliar exportada para importar el contenido JSON de un diagrama
+ * (texto) y aplicar validaciones/normalizaciones antes de persistirlo en el store.
+ *
+ * - Garantiza ids únicos para las clases importadas.
+ * - Valida que todas las relaciones apunten a clases existentes (por id o name).
+ * - Invoca setDiagram(diagram) y limpia selección mediante selectClass/selectRelation.
+ *
+ * @param text - contenido JSON del archivo importado
+ * @param setDiagram - callback para persistir el diagrama en el store
+ * @param selectClass - callback opcional para limpiar la selección de clase
+ * @param selectRelation - callback opcional para limpiar la selección de relación
+ */
+export function importUMLFromString(
+  text: string,
+  setDiagram: (d: UMLDiagram) => void,
+  selectClass?: (id: string | null) => void,
+  selectRelation?: (id: string | null) => void
+) {
+  const umlJson = JSON.parse(text);
+  // usar el parseador puro para obtener estructura inicial
+  const parsed = parseUMLJson(umlJson);
+
+  // Normalizar ids: asegurar unicidad
+  const seen = new Set<string>();
+  parsed.classes = parsed.classes.map((cls: UMLClass, idx: number) => {
+    let id = cls.id;
+    if (!id || seen.has(id)) {
+      id = `imported-class-${Date.now()}-${idx}-${Math.random().toString(36).slice(2,6)}`;
+    }
+    seen.add(id);
+    return { ...cls, id };
+  });
+
+  // Construir lookup por id y por name
+  const ids = new Set(parsed.classes.map((c: UMLClass) => c.id));
+  const names = new Map(parsed.classes.map((c: UMLClass) => [c.name, c.id]));
+
+  // Validar y remapear relaciones a ids existentes
+  parsed.relations = parsed.relations.map((rel: UMLRelation, idx: number) => {
+    const sourceKey = rel.source;
+    const targetKey = rel.target;
+
+    const mappedSource = ids.has(sourceKey) ? sourceKey : (names.get(sourceKey) ?? null);
+    const mappedTarget = ids.has(targetKey) ? targetKey : (names.get(targetKey) ?? null);
+
+    if (!mappedSource || !mappedTarget) {
+      throw new Error(`Relación inválida: referencia a clase inexistente (source: ${rel.source}, target: ${rel.target})`);
+    }
+
+    return { ...rel, id: rel.id || `imported-relation-${Date.now()}-${idx}`, source: mappedSource, target: mappedTarget };
+  });
+
+  // Persistir diagrama en el store y limpiar selección
+  setDiagram(parsed);
+  if (typeof selectClass === 'function') selectClass(null);
+  if (typeof selectRelation === 'function') selectRelation(null);
+}
+
+export function parseUMLJson(umlJson: any, baseDiagramId?: string): UMLDiagram {
+  if (!umlJson || !Array.isArray(umlJson.classes)) {
+    throw new Error('Formato de UML inválido: falta "classes"');
+  }
+
+  const idMap: Record<string, string> = {};
+  const nameMap: Record<string, string> = {};
+
+  const importedClasses: UMLClass[] = (umlJson.classes || []).map((cls: any, index: number) => {
+    const originalKey = cls.id ?? cls.name ?? `original-${index}`;
+    const newId = cls.id ?? `imported-class-${Date.now()}-${index}`;
+    idMap[originalKey] = newId;
+    if (cls.name) nameMap[cls.name] = newId;
+
+    return {
+      id: newId,
+      name: cls.name || `Class${index + 1}`,
+      attributes: cls.attributes || [],
+      methods: cls.methods || [],
+      position: cls.position || { x: 100 + (index * 250), y: 100 },
+      width: cls.width || 200,
+      height: cls.height || 100
+    } as UMLClass;
+  });
+
+  const importedRelations: UMLRelation[] = (umlJson.relations || []).map((rel: any, index: number) => {
+    const sourceKey = rel.source ?? rel.sourceClass ?? rel.sourceName;
+    const targetKey = rel.target ?? rel.targetClass ?? rel.targetName;
+
+    const mappedSource = idMap[sourceKey] || nameMap[sourceKey] || rel.source;
+    const mappedTarget = idMap[targetKey] || nameMap[targetKey] || rel.target;
+
+    return {
+      id: rel.id || `imported-relation-${Date.now()}-${index}`,
+      type: rel.type || ('ONE_TO_MANY' as any),
+      source: mappedSource,
+      target: mappedTarget,
+      sourceCardinality: rel.sourceCardinality || rel.sourceCardinality || null,
+      targetCardinality: rel.targetCardinality || rel.targetCardinality || null,
+      mappedBy: rel.mappedBy || null,
+      joinColumn: rel.joinColumn || null,
+      label: rel.label || null
+    } as UMLRelation;
+  });
+
+  return {
+    id: baseDiagramId || umlJson.id || `diagram-${Date.now()}`,
+    name: umlJson.name || 'Diagrama Importado',
+    package: umlJson.package || 'com.example',
+    classes: importedClasses,
+    relations: importedRelations,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  } as UMLDiagram;
+}
 
 export function useDiagramActions() {
+  // selector tipado para evitar que `useDiagramStore()` devuelva `unknown`
+  // y para obtener solo las propiedades necesarias del store.
   const {
     diagram,
     addClass,
     setDiagram,
     selectClass,
     selectRelation
-  } = useDiagramStore();
+  } = useDiagramStore((s: any) => ({
+    diagram: s.diagram as UMLDiagram | null,
+    addClass: s.addClass as (cls: UMLClass) => void,
+    setDiagram: s.setDiagram as (d: UMLDiagram) => void,
+    selectClass: s.selectClass as (id: string | null) => void,
+    selectRelation: s.selectRelation as (id: string | null) => void
+  }));
 
   /**
    * Agregar una nueva clase al diagrama
@@ -17,10 +145,10 @@ export function useDiagramActions() {
     if (!diagram) return;
 
     const freePosition = findFreePosition({ classes: diagram.classes });
-    const existingNames = diagram.classes.map(c => c.name);
+    const existingNames = diagram.classes.map((c: UMLClass) => c.name);
     const uniqueName = generateUniqueClassName(existingNames);
 
-    const newClass = {
+    const newClass: UMLClass = {
       id: `class-${Date.now()}`,
       name: uniqueName,
       attributes: [],
@@ -100,50 +228,12 @@ export function useDiagramActions() {
   };
 
   /**
-   * Exportar diagrama como JSON (incluye clases con id y relaciones mapeadas por id y nombre)
+   * Exportar diagrama como JSON (usa serializeDiagram para consistencia y tests)
    */
   const handleExportUML = () => {
     if (!diagram) return;
 
-    const classesForExport = diagram.classes.map(cls => ({
-      id: cls.id,
-      name: cls.name,
-      attributes: cls.attributes || [],
-      methods: cls.methods || [],
-      position: cls.position || { x: 0, y: 0 },
-      width: cls.width || 200,
-      height: cls.height || 100
-    }));
-
-    const relationsForExport = (diagram.relations || []).map(rel => {
-      const sourceClass = diagram.classes.find(c => c.id === rel.source) || diagram.classes.find(c => c.name === rel.source);
-      const targetClass = diagram.classes.find(c => c.id === rel.target) || diagram.classes.find(c => c.name === rel.target);
-
-      return {
-        id: rel.id || `relation-${Date.now()}`,
-        type: rel.type,
-        sourceId: sourceClass?.id || rel.source,
-        sourceName: sourceClass?.name || rel.sourceName || sourceClass?.id || rel.source,
-        targetId: targetClass?.id || rel.target,
-        targetName: targetClass?.name || rel.targetName || targetClass?.id || rel.target,
-        sourceCardinality: rel.sourceCardinality || null,
-        targetCardinality: rel.targetCardinality || null,
-        mappedBy: rel.mappedBy || null,
-        joinColumn: rel.joinColumn || null,
-        label: rel.label || null
-      };
-    });
-
-    const umlJson = {
-      id: diagram.id || `diagram-${Date.now()}`,
-      name: diagram.name || 'Diagrama UML',
-      package: diagram.package || 'com.example',
-      createdAt: diagram.createdAt || new Date(),
-      updatedAt: diagram.updatedAt || new Date(),
-      classes: classesForExport,
-      relations: relationsForExport
-    };
-
+    const umlJson = serializeDiagram(diagram);
     const blob = new Blob([JSON.stringify(umlJson, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -156,7 +246,7 @@ export function useDiagramActions() {
   /**
    * Importar diagrama desde JSON
    */
-  const handleImportUML = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImportUML = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -188,7 +278,7 @@ export function useDiagramActions() {
             height: cls.height || 100,
             attributes: cls.attributes || [],
             methods: cls.methods || []
-          };
+          } as UMLClass;
         });
 
         // Procesar relaciones y re-mapear source/target usando los mapeos anteriores.
@@ -204,17 +294,16 @@ export function useDiagramActions() {
             id: rel.id || `imported-relation-${Date.now()}-${index}`,
             source: mappedSource,
             target: mappedTarget,
-            // asegurar campos opcionales
-            sourceCardinality: rel.sourceCardinality || rel.sourceCardinality,
-            targetCardinality: rel.targetCardinality || rel.targetCardinality,
-            mappedBy: rel.mappedBy || rel.mappedBy,
-            joinColumn: rel.joinColumn || rel.joinColumn,
-            label: rel.label || rel.label
-          };
+            sourceCardinality: rel.sourceCardinality || null,
+            targetCardinality: rel.targetCardinality || null,
+            mappedBy: rel.mappedBy || null,
+            joinColumn: rel.joinColumn || null,
+            label: rel.label || null
+          } as UMLRelation;
         });
 
-        const importedDiagram = {
-          id: diagram?.id || 'imported-diagram',
+        const importedDiagram: UMLDiagram = {
+          id: diagram?.id || umlJson.id || 'imported-diagram',
           name: umlJson.name || 'Diagrama Importado',
           package: umlJson.package || 'com.example',
           classes: importedClasses,
@@ -224,8 +313,9 @@ export function useDiagramActions() {
         };
 
         setDiagram(importedDiagram);
-        selectClass(null);
-        selectRelation(null);
+        // asegurarse de que las funciones existan antes de llamarlas
+        if (typeof selectClass === 'function') selectClass(null);
+        if (typeof selectRelation === 'function') selectRelation(null);
 
         alert('✅ Diagrama importado exitosamente');
       } catch (error) {
@@ -240,6 +330,7 @@ export function useDiagramActions() {
     handleAddClass,
     handleResetDiagram,
     handleExportUML,
-    handleImportUML
+    handleImportUML,
+    // otros handlers...
   };
 }

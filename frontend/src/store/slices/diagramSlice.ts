@@ -1,5 +1,14 @@
 import { UMLClass, UMLRelation, UMLDiagram } from '../../types/uml';
-
+/**
+ * createDiagramSlice
+ *
+ * Slice encargado de gestionar el estado del diagrama UML (clases, relaciones, metadata)
+ * y las acciones CRUD asociadas. Provee también utilidades para operaciones en lote
+ * y helpers para integrar resultados de IA.
+ *
+ * @param set - función de zustand para actualizar el estado
+ * @param get - función de zustand para leer el estado actual
+ */
 export const createDiagramSlice = (set: any, get: any) => ({
   // estado por defecto del diagrama (si no se inyecta desde el store principal)
   diagram: null as UMLDiagram | null,
