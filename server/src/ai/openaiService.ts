@@ -457,11 +457,11 @@ function getMockSuggestions(umlData: any): AISuggestion[] {
   // Check for missing ID fields
   umlData.classes?.forEach((cls: any) => {
     const hasId = cls.attributes?.some((attr: any) => attr.isId);
-    if (!hasId) {
+      if (!hasId) {
       suggestions.push({
         type: 'attribute',
         title: 'Missing Primary Key',
-        description: `Class "${cls.name}" should have a primary key field`,
+        description: `La clase "${cls.name}" debería tener un campo clave primaria (id)`,
         suggestion: {
           name: 'id',
           type: 'Long',
@@ -481,7 +481,7 @@ function getMockSuggestions(umlData: any): AISuggestion[] {
       suggestions.push({
         type: 'attribute',
         title: 'Missing Timestamps',
-        description: `Class "${cls.name}" could benefit from createdAt and updatedAt fields`,
+        description: `La clase "${cls.name}" podría beneficiarse de los campos createdAt y updatedAt`,
         suggestion: [
           { name: 'createdAt', type: 'LocalDateTime', nullable: false },
           { name: 'updatedAt', type: 'LocalDateTime', nullable: false }
@@ -498,7 +498,7 @@ function getMockSuggestions(umlData: any): AISuggestion[] {
         suggestions.push({
           type: 'naming',
           title: 'Naming Convention',
-          description: `Attribute "${attr.name}" should be in camelCase`,
+          description: `El atributo "${attr.name}" debería estar en camelCase`,
           suggestion: {
             oldName: attr.name,
             newName: attr.name.charAt(0).toLowerCase() + attr.name.slice(1)

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { getAISuggestions, generateFromText, generateDiagramFromText, modifyDiagramFromText } from '../ai/openaiService';
+import { applyActionsToDiagram } from '../ai/applyUMLActions'; // crear/importar implementacion
 
 const router = Router();
 
@@ -83,31 +84,42 @@ router.post('/generate-diagram', async (req, res): Promise<void> => {
 
 export { router as aiRoutes };
 
-// Nueva ruta: modificar diagrama a partir de texto + estado actual
+// Nueva ruta: modificar diagrama a partir de texto + estado actual (aplica, persiste y emite)
 router.post('/modify-diagram', async (req, res): Promise<void> => {
   try {
     const { text, diagram } = req.body;
-
     if (!text || typeof text !== 'string') {
-      res.status(400).json({ 
-        error: 'Invalid input. Required: text string' 
-      });
+      res.status(400).json({ error: 'Invalid input. Required: text string' });
       return;
     }
-
     if (!diagram || typeof diagram !== 'object') {
-      res.status(400).json({ 
-        error: 'Invalid input. Required: diagram object' 
-      });
+      res.status(400).json({ error: 'Invalid input. Required: diagram object' });
       return;
     }
 
-    console.log('Modifying UML diagram from text');
+    // 1) Pedir acciones al AI
     const actionResponse = await modifyDiagramFromText(diagram, text);
-    res.json(actionResponse);
+    const actions = actionResponse.actions || [];
+
+    // 2) Validar acciones (recomendado: zod/AJV) - omito validación completa aquí
+
+    // 3) Aplicar acciones al diagrama (no muta el original)
+    const updatedDiagram = applyActionsToDiagram(diagram, actions);
+
+    // 4) Persistir el diagrama actualizado (TODO: conectar con tu repo/db)
+    // Example: await persistDiagram(updatedDiagram, diagramId);
+    // Implementa persistDiagram en tu capa db/repository
+    // await persistDiagram(updatedDiagram);
+
+    // 5) Emitir evento de colaboración -> notificar a clientes conectados (TODO)
+    // Example: broadcastUpdate(updatedDiagram);
+    // Implementa broadcastUpdate usando tu socket manager (Socket.IO / ws)
+
+    // 6) Devolver acciones y diagrama actualizado al cliente
+    res.json({ actions, updatedDiagram });
   } catch (error) {
     console.error('Error modifying diagram from text:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Failed to modify UML diagram from text',
       message: error instanceof Error ? error.message : 'Unknown error'
     });

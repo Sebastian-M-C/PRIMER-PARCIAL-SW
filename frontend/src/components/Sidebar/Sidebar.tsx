@@ -28,7 +28,8 @@ export const Sidebar: React.FC = () => {
     handleAddClass,
     handleResetDiagram,
     handleExportUML,
-    handleImportUML
+    handleImportUML,
+    handleAIModify
   } = useDiagramActions();
 
   const {
@@ -128,6 +129,7 @@ export const Sidebar: React.FC = () => {
         onResetDiagram={handleResetDiagram}
         onAISuggest={handleAISuggest}
         onAIGenerate={handleAIGenerate}
+        onAIModify={handleAIModify}
         isGenerating={isGenerating}
         hasClasses={!!diagram?.classes.length}
         onUploadImage={handleUploadImage}

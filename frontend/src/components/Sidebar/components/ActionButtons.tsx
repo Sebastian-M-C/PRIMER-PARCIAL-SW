@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, Download, Upload, Save, RotateCcw, Sparkles, Type, Smartphone } from 'lucide-react';
+import { Plus, Download, Upload, Save, RotateCcw, Sparkles, Type, Smartphone, Edit3 } from 'lucide-react';
 
 interface ActionButtonsProps {
   onAddClass: () => void;
@@ -14,6 +14,8 @@ interface ActionButtonsProps {
   hasClasses: boolean;
   // Nuevo: handler opcional para subir imagen (multipart). Recibe el change event del input file.
   onUploadImage?: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  // NUEVO: handler opcional para "IA Modificar"
+  onAIModify?: () => void;
 }
 
 export const ActionButtons: React.FC<ActionButtonsProps> = ({
@@ -27,7 +29,8 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
   onAIGenerate,
   isGenerating,
   hasClasses
-  , onUploadImage
+  , onUploadImage,
+  onAIModify
 }) => {
   return (
     <div style={{
@@ -276,6 +279,31 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
         >
           <Type size={14} />
           {isGenerating ? 'Cargando...' : 'IA Generar'}
+        </button>
+
+        {/* NUEVO: IA Modificar */}
+        <button
+          onClick={onAIModify}
+          disabled={isGenerating}
+          style={{
+            flex: 1,
+            padding: '6px 8px',
+            backgroundColor: isGenerating ? '#6c757d' : '#20c997',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: isGenerating ? 'not-allowed' : 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '4px',
+            fontSize: '12px',
+            opacity: isGenerating ? 0.6 : 1
+          }}
+          title="Modificar diagrama usando IA (instrucción en texto)"
+        >
+          <Edit3 size={14} />
+          {isGenerating ? 'Cargando...' : 'IA Modificar'}
         </button>
       </div>
     </div>

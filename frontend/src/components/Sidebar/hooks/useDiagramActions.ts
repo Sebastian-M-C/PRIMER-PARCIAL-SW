@@ -2,7 +2,8 @@ import type { ChangeEvent } from 'react';
 import { useDiagramStore } from '../../../store/useDiagramStore';
 import { findFreePosition, generateUniqueClassName } from '../utils/positionFinder';
 import { serializeDiagram } from './diagramSerializer';
-import type { UMLDiagram, UMLClass, UMLRelation } from '../../../../types/uml';
+import type { UMLDiagram, UMLClass, UMLRelation } from '../../../types/uml';
+import { modifyDiagram } from '../../../services/aiService';
 
 /**
  * importUMLFromString
@@ -326,11 +327,50 @@ export function useDiagramActions() {
     reader.readAsText(file);
   };
 
+  /**
+   * IA Modificar
+   *
+   * - Pide una instrucción al usuario (prompt sencillo).
+   * - Llama al servicio modifyDiagram(text, diagram).
+   * - Si el servidor devuelve `updatedDiagram`, lo aplica en el store.
+   * - Si solo devuelve `actions`, muestra las acciones propuestas.
+   */
+  const handleAIModify = async () => {
+    if (!diagram) {
+      alert('No hay diagrama activo para modificar.');
+      return;
+    }
+
+    const instruction = prompt('Ingrese instrucción para IA (ej: "añade email a la clase Usuario")');
+    if (!instruction) return;
+
+    try {
+      // opcional: mostrar spinner / estado de generación
+      const result = await modifyDiagram(instruction, diagram);
+      if (result.updatedDiagram) {
+        setDiagram(result.updatedDiagram);
+        if (typeof selectClass === 'function') selectClass(null);
+        if (typeof selectRelation === 'function') selectRelation(null);
+        alert('✅ Diagrama actualizado por IA');
+      } else if (result.actions && result.actions.length > 0) {
+        // Si el servidor no aplicó las acciones, notificamos al usuario.
+        // Puedes mejorar aplicando las acciones localmente o pidiendo al servidor que persista.
+        alert(`La IA propone las siguientes acciones:\n\n${JSON.stringify(result.actions, null, 2)}\n\nEl servidor no devolvió el diagrama actualizado automáticamente.`);
+      } else {
+        alert('La IA no devolvió acciones ni diagrama actualizado.');
+      }
+    } catch (err) {
+      console.error('Error AI modify:', err);
+      alert('Error al solicitar modificación por IA: ' + (err instanceof Error ? err.message : 'Unknown error'));
+    }
+  };
+
   return {
     handleAddClass,
     handleResetDiagram,
     handleExportUML,
     handleImportUML,
     // otros handlers...
+    handleAIModify // <-- nuevo handler exportado
   };
 }
