@@ -64,6 +64,29 @@ export async function generateSpringBootProject(umlData: UMLDiagramJSON): Promis
 }
 
 /**
+ * Normaliza un nombre dado a un identificador de clase Java válido (PascalCase).
+ * Elimina espacios y caracteres no alfanuméricos, convierte a PascalCase y
+ * asegura que comience con una letra (prefija con 'C' si comienza con dígito).
+ */
+function toJavaClassName(name: string): string {
+  if (!name) return 'GeneratedClass';
+  // Split on non-alphanumeric characters, filter empties
+  const parts = name.split(/[^a-zA-Z0-9]+/).filter(Boolean);
+  if (parts.length === 0) return 'GeneratedClass';
+  const pascal = parts.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join('');
+  // Ensure it starts with a letter
+  if (!/^[A-Za-z]/.test(pascal)) return `C${pascal}`;
+  return pascal;
+}
+
+/**
+ * Normaliza un nombre a una variable/archivo en minúsculas sin espacios
+ */
+function toSafeName(name: string): string {
+  return toJavaClassName(name).toLowerCase();
+}
+
+/**
  * Crea la estructura de directorios estándar de un proyecto Spring Boot.
  * - projectDir: ruta base del proyecto.
  * - basePackage: paquete base Java (ej.: com.example.app) para derivar paths.
@@ -231,22 +254,23 @@ async function generateMavenFiles(projectDir: string, projectName: string, baseP
   await fs.promises.writeFile(path.join(projectDir, 'pom.xml'), pomContent);
 
   // Main application class
+  const appClassName = toJavaClassName(projectName);
   const mainClassContent = `package ${basePackage};
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
-public class ${projectName.charAt(0).toUpperCase() + projectName.slice(1)}Application {
+public class ${appClassName}Application {
 
     public static void main(String[] args) {
-        SpringApplication.run(${projectName.charAt(0).toUpperCase() + projectName.slice(1)}Application.class, args);
+        SpringApplication.run(${appClassName}Application.class, args);
     }
 }`;
 
   const mainClassPath = path.join(projectDir, 'src', 'main', 'java', basePackage.replace(/\./g, '/'));
   await fs.promises.writeFile(
-    path.join(mainClassPath, `${projectName.charAt(0).toUpperCase() + projectName.slice(1)}Application.java`),
+    path.join(mainClassPath, `${appClassName}Application.java`),
     mainClassContent
   );
 }
@@ -303,9 +327,10 @@ async function generateEntities(projectDir: string, basePackage: string, classes
   const packagePath = path.join(projectDir, 'src', 'main', 'java', basePackage.replace(/\./g, '/'), 'entity');
 
   for (const cls of classes) {
-    const entityContent = generateEntityClass(basePackage, cls);
+    const className = toJavaClassName(cls.name);
+    const entityContent = generateEntityClass(basePackage, cls, className);
     await fs.promises.writeFile(
-      path.join(packagePath, `${cls.name}.java`),
+      path.join(packagePath, `${className}.java`),
       entityContent
     );
   }
@@ -316,7 +341,8 @@ async function generateEntities(projectDir: string, basePackage: string, classes
  * - cls: objeto con nombre, atributos y relaciones.
  * - Retorna: string con el código Java de la entidad.
  */
-function generateEntityClass(basePackage: string, cls: any): string {
+function generateEntityClass(basePackage: string, cls: any, classNameOverride?: string): string {
+  const className = classNameOverride || toJavaClassName(cls.name);
   const hasId = cls.attributes?.some((attr: any) => attr.isId);
   const idAttribute = cls.attributes?.find((attr: any) => attr.isId);
 
@@ -349,12 +375,12 @@ import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
 @Entity
-@Table(name = "${cls.name.toLowerCase()}s")
+@Table(name = "${toSafeName(className)}s")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class ${cls.name} {`;
+public class ${className} {`;
 
   // Add ID field if not present
   if (!hasId) {
@@ -425,6 +451,10 @@ public class ${cls.name} {`;
 
 function generateRelationshipAnnotation(relation: any): string {
   let content = `\n\n    `;
+  const targetClass = toJavaClassName(relation.target || 'Related');
+  const targetVar = toSafeName(targetClass);
+  const sourceClass = relation.source ? toJavaClassName(relation.source) : undefined;
+  const sourceVar = sourceClass ? toSafeName(sourceClass) : undefined;
 
   switch (relation.type) {
     case 'ONE_TO_ONE':
@@ -432,29 +462,38 @@ function generateRelationshipAnnotation(relation: any): string {
       if (relation.mappedBy) {
         content += `(mappedBy = "${relation.mappedBy}")`;
       }
-      content += `\n    private ${relation.target} ${relation.target.toLowerCase()};`;
+      content += `\n    private ${targetClass} ${targetVar};`;
       break;
 
-    case 'ONE_TO_MANY':
-      content += `@OneToMany(mappedBy = "${relation.mappedBy || 'id'}", cascade = CascadeType.ALL, fetch = FetchType.LAZY)\n    `;
-      content += `private List<${relation.target}> ${relation.target.toLowerCase()}s = new ArrayList<>();`;
+    case 'ONE_TO_MANY': {
+      // Only include mappedBy if provided to avoid wrong defaults
+      if (relation.mappedBy) {
+        content += `@OneToMany(mappedBy = "${relation.mappedBy}", cascade = CascadeType.ALL, fetch = FetchType.LAZY)\n    `;
+      } else {
+        content += `@OneToMany(cascade = CascadeType.ALL, fetch = FetchType.LAZY)\n    `;
+      }
+      content += `private List<${targetClass}> ${targetVar}s = new ArrayList<>();`;
       break;
+    }
 
     case 'MANY_TO_ONE':
       content += `@ManyToOne(fetch = FetchType.LAZY)\n    `;
       if (relation.joinColumn) {
         content += `@JoinColumn(name = "${relation.joinColumn}")`;
       } else {
-        content += `@JoinColumn(name = "${relation.target.toLowerCase()}_id")`;
+        content += `@JoinColumn(name = "${targetVar}_id")`;
       }
-      content += `\n    private ${relation.target} ${relation.target.toLowerCase()};`;
+      content += `\n    private ${targetClass} ${targetVar};`;
       break;
 
-    case 'MANY_TO_MANY':
+    case 'MANY_TO_MANY': {
+      const joinTable = sourceVar ? `${sourceVar}_${targetVar}` : `${targetVar}_${targetVar}`;
+      const joinColumn = sourceVar ? `${sourceVar}_id` : 'id';
       content += `@ManyToMany(cascade = CascadeType.ALL, fetch = FetchType.LAZY)\n    `;
-      content += `@JoinTable(\n        name = "${relation.target.toLowerCase()}_${relation.target.toLowerCase()}",\n        joinColumns = @JoinColumn(name = "id"),\n        inverseJoinColumns = @JoinColumn(name = "${relation.target.toLowerCase()}_id")\n    )\n    `;
-      content += `private List<${relation.target}> ${relation.target.toLowerCase()}s = new ArrayList<>();`;
+      content += `@JoinTable(\n        name = "${joinTable}",\n        joinColumns = @JoinColumn(name = "${joinColumn}"),\n        inverseJoinColumns = @JoinColumn(name = "${targetVar}_id")\n    )\n    `;
+      content += `private List<${targetClass}> ${targetVar}s = new ArrayList<>();`;
       break;
+    }
   }
 
   return content;
@@ -471,15 +510,16 @@ async function generateDTOs(projectDir: string, basePackage: string, classes: an
   for (const cls of classes) {
     // Request DTO
     const requestDtoContent = generateRequestDTO(basePackage, cls);
+    const className = toJavaClassName(cls.name);
     await fs.promises.writeFile(
-      path.join(packagePath, `${cls.name}Request.java`),
+      path.join(packagePath, `${className}Request.java`),
       requestDtoContent
     );
 
     // Response DTO
     const responseDtoContent = generateResponseDTO(basePackage, cls);
     await fs.promises.writeFile(
-      path.join(packagePath, `${cls.name}Response.java`),
+      path.join(packagePath, `${className}Response.java`),
       responseDtoContent
     );
   }
@@ -518,17 +558,27 @@ function collectImportsForAttributes(attrs: any[] = []): string[] {
 function generateRequestDTO(basePackage: string, cls: any): string {
   const imports = collectImportsForAttributes(cls.attributes);
 
+  const className = toJavaClassName(cls.name);
+
   let content = `package ${basePackage}.dto;\n\n`;
 
   if (imports.length) {
     content += imports.join('\n') + '\n\n';
   }
 
-  content += `import jakarta.validation.constraints.*;\nimport lombok.*;\n\n@Data\n@NoArgsConstructor\n@AllArgsConstructor\n@Builder\npublic class ${cls.name}Request {`;
+  // Determine DTO fields (for Request we skip ID)
+  const dtoFields = (cls.attributes || []).filter((a: any) => !a.isId);
+  const hasFields = dtoFields.length > 0;
 
-  for (const attr of cls.attributes || []) {
-    if (attr.isId) continue; // Skip ID in request DTO
+  // Add lombok annotations conditionally to avoid duplicate constructors when no fields exist
+  const lombokAnnotations = ['@Data', '@NoArgsConstructor'];
+  if (hasFields) {
+    lombokAnnotations.push('@AllArgsConstructor', '@Builder');
+  }
 
+  content += `import jakarta.validation.constraints.*;\nimport lombok.*;\n\n${lombokAnnotations.join('\n')}\npublic class ${className}Request {`;
+
+  for (const attr of dtoFields) {
     content += `\n\n    `;
 
     if (!attr.nullable) {
@@ -560,16 +610,24 @@ function generateRequestDTO(basePackage: string, cls: any): string {
 
 function generateResponseDTO(basePackage: string, cls: any): string {
   const imports = collectImportsForAttributes(cls.attributes);
-
+  const className = toJavaClassName(cls.name);
   let content = `package ${basePackage}.dto;\n\n`;
 
   if (imports.length) {
     content += imports.join('\n') + '\n\n';
   }
 
-  content += `import lombok.*;\n\n@Data\n@NoArgsConstructor\n@AllArgsConstructor\n@Builder\npublic class ${cls.name}Response {`;
+  const dtoFields = (cls.attributes || []);
+  const hasFields = dtoFields.length > 0;
 
-  for (const attr of cls.attributes || []) {
+  const lombokAnnotations = ['@Data', '@NoArgsConstructor'];
+  if (hasFields) {
+    lombokAnnotations.push('@AllArgsConstructor', '@Builder');
+  }
+
+  content += `import lombok.*;\n\n${lombokAnnotations.join('\n')}\npublic class ${className}Response {`;
+
+  for (const attr of dtoFields) {
     content += `\n\n    `;
     const javaType = mapTypeToJava(attr.type);
     content += `private ${javaType} ${attr.name};`;
@@ -588,9 +646,10 @@ async function generateRepositories(projectDir: string, basePackage: string, cla
   const packagePath = path.join(projectDir, 'src', 'main', 'java', basePackage.replace(/\./g, '/'), 'repository');
 
   for (const cls of classes) {
+    const className = toJavaClassName(cls.name);
     const repositoryContent = `package ${basePackage}.repository;
 
-import ${basePackage}.entity.${cls.name};
+import ${basePackage}.entity.${className};
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -600,14 +659,14 @@ import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface ${cls.name}Repository extends JpaRepository<${cls.name}, Long> {
+public interface ${className}Repository extends JpaRepository<${className}, Long> {
     
     // Custom query methods can be added here
-    // Example: List<${cls.name}> findBy${cls.name}Name(String name);
+    // Example: List<${className}> findBy${className}Name(String name);
 }`;
 
     await fs.promises.writeFile(
-      path.join(packagePath, `${cls.name}Repository.java`),
+      path.join(packagePath, `${className}Repository.java`),
       repositoryContent
     );
   }
@@ -623,39 +682,40 @@ async function generateServices(projectDir: string, basePackage: string, classes
   const implPackagePath = path.join(servicePackagePath, 'impl');
 
   for (const cls of classes) {
-    // Service interface
-    const serviceContent = `package ${basePackage}.service;
+  const className = toJavaClassName(cls.name);
+  // Service interface
+  const serviceContent = `package ${basePackage}.service;
 
-import ${basePackage}.dto.${cls.name}Request;
-import ${basePackage}.dto.${cls.name}Response;
+import ${basePackage}.dto.${className}Request;
+import ${basePackage}.dto.${className}Response;
 import java.util.List;
 
-public interface ${cls.name}Service {
+public interface ${className}Service {
     
-    ${cls.name}Response create(${cls.name}Request request);
+  ${className}Response create(${className}Request request);
     
-    ${cls.name}Response findById(Long id);
+  ${className}Response findById(Long id);
     
-    List<${cls.name}Response> findAll();
+  List<${className}Response> findAll();
     
-    ${cls.name}Response update(Long id, ${cls.name}Request request);
+  ${className}Response update(Long id, ${className}Request request);
     
-    void delete(Long id);
+  void delete(Long id);
 }`;
 
-    await fs.promises.writeFile(
-      path.join(servicePackagePath, `${cls.name}Service.java`),
-      serviceContent
-    );
+  await fs.promises.writeFile(
+    path.join(servicePackagePath, `${className}Service.java`),
+    serviceContent
+  );
 
-    // Service implementation
-    const serviceImplContent = `package ${basePackage}.service.impl;
+  // Service implementation
+  const serviceImplContent = `package ${basePackage}.service.impl;
 
-import ${basePackage}.dto.${cls.name}Request;
-import ${basePackage}.dto.${cls.name}Response;
-import ${basePackage}.entity.${cls.name};
-import ${basePackage}.repository.${cls.name}Repository;
-import ${basePackage}.service.${cls.name}Service;
+import ${basePackage}.dto.${className}Request;
+import ${basePackage}.dto.${className}Response;
+import ${basePackage}.entity.${className};
+import ${basePackage}.repository.${className}Repository;
+import ${basePackage}.service.${className}Service;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -666,70 +726,70 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 @Transactional
-public class ${cls.name}ServiceImpl implements ${cls.name}Service {
+public class ${className}ServiceImpl implements ${className}Service {
     
-    private final ${cls.name}Repository ${cls.name.toLowerCase()}Repository;
+  private final ${className}Repository ${className.toLowerCase()}Repository;
     
-    @Override
-    public ${cls.name}Response create(${cls.name}Request request) {
-        ${cls.name} entity = toEntity(request);
-        ${cls.name} saved = ${cls.name.toLowerCase()}Repository.save(entity);
-        return toResponse(saved);
-    }
+  @Override
+  public ${className}Response create(${className}Request request) {
+    ${className} entity = toEntity(request);
+    ${className} saved = ${className.toLowerCase()}Repository.save(entity);
+    return toResponse(saved);
+  }
     
-    @Override
-    @Transactional(readOnly = true)
-    public ${cls.name}Response findById(Long id) {
-        ${cls.name} entity = ${cls.name.toLowerCase()}Repository.findById(id)
-            .orElseThrow(() -> new RuntimeException("${cls.name} not found with id: " + id));
-        return toResponse(entity);
-    }
+  @Override
+  @Transactional(readOnly = true)
+  public ${className}Response findById(Long id) {
+    ${className} entity = ${className.toLowerCase()}Repository.findById(id)
+      .orElseThrow(() -> new RuntimeException("${className} not found with id: " + id));
+    return toResponse(entity);
+  }
     
-    @Override
-    @Transactional(readOnly = true)
-    public List<${cls.name}Response> findAll() {
-        return ${cls.name.toLowerCase()}Repository.findAll()
-            .stream()
-            .map(this::toResponse)
-            .collect(Collectors.toList());
-    }
+  @Override
+  @Transactional(readOnly = true)
+  public List<${className}Response> findAll() {
+    return ${className.toLowerCase()}Repository.findAll()
+      .stream()
+      .map(this::toResponse)
+      .collect(Collectors.toList());
+  }
     
-    @Override
-    public ${cls.name}Response update(Long id, ${cls.name}Request request) {
-        ${cls.name} entity = ${cls.name.toLowerCase()}Repository.findById(id)
-            .orElseThrow(() -> new RuntimeException("${cls.name} not found with id: " + id));
+  @Override
+  public ${className}Response update(Long id, ${className}Request request) {
+    ${className} entity = ${className.toLowerCase()}Repository.findById(id)
+      .orElseThrow(() -> new RuntimeException("${className} not found with id: " + id));
         
-        updateEntity(request, entity);
-        ${cls.name} updated = ${cls.name.toLowerCase()}Repository.save(entity);
-        return toResponse(updated);
-    }
+    updateEntity(request, entity);
+    ${className} updated = ${className.toLowerCase()}Repository.save(entity);
+    return toResponse(updated);
+  }
     
-    @Override
-    public void delete(Long id) {
-        if (!${cls.name.toLowerCase()}Repository.existsById(id)) {
-            throw new RuntimeException("${cls.name} not found with id: " + id);
-        }
-        ${cls.name.toLowerCase()}Repository.deleteById(id);
+  @Override
+  public void delete(Long id) {
+    if (!${className.toLowerCase()}Repository.existsById(id)) {
+      throw new RuntimeException("${className} not found with id: " + id);
     }
+    ${className.toLowerCase()}Repository.deleteById(id);
+  }
     
-    private ${cls.name} toEntity(${cls.name}Request request) {
-        return ${cls.name}.builder()${generateBuilderFieldsForEntity(cls)}
-                .build();
-    }
+  private ${className} toEntity(${className}Request request) {
+    return ${className}.builder()${generateBuilderFieldsForEntity(cls)}
+        .build();
+  }
     
-    private ${cls.name}Response toResponse(${cls.name} entity) {
-        return ${cls.name}Response.builder()${generateBuilderFieldsForResponse(cls)}
-                .build();
-    }
+  private ${className}Response toResponse(${className} entity) {
+    return ${className}Response.builder()${generateBuilderFieldsForResponse(cls)}
+        .build();
+  }
     
-    private void updateEntity(${cls.name}Request request, ${cls.name} entity) {${generateUpdateFieldsForEntity(cls)}
-    }
+  private void updateEntity(${className}Request request, ${className} entity) {${generateUpdateFieldsForEntity(cls)}
+  }
 }`;
 
-    await fs.promises.writeFile(
-      path.join(implPackagePath, `${cls.name}ServiceImpl.java`),
-      serviceImplContent
-    );
+  await fs.promises.writeFile(
+    path.join(implPackagePath, `${className}ServiceImpl.java`),
+    serviceImplContent
+  );
   }
 }
 
@@ -744,11 +804,13 @@ async function generateControllers(projectDir: string, basePackage: string, clas
   const packagePath = path.join(projectDir, 'src', 'main', 'java', basePackage.replace(/\./g, '/'), 'controller');
 
   for (const cls of classes) {
-    const controllerContent = `package ${basePackage}.controller;
+  const className = toJavaClassName(cls.name);
+  const routeName = toSafeName(className);
+  const controllerContent = `package ${basePackage}.controller;
 
-import ${basePackage}.dto.${cls.name}Request;
-import ${basePackage}.dto.${cls.name}Response;
-import ${basePackage}.service.${cls.name}Service;
+import ${basePackage}.dto.${className}Request;
+import ${basePackage}.dto.${className}Response;
+import ${basePackage}.service.${className}Service;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -758,48 +820,48 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/${cls.name.toLowerCase()}s")
+@RequestMapping("/api/${routeName}s")
 @RequiredArgsConstructor
 @CrossOrigin(origins = "*")
-public class ${cls.name}Controller {
+public class ${className}Controller {
     
-    private final ${cls.name}Service ${cls.name.toLowerCase()}Service;
+  private final ${className}Service ${className.toLowerCase()}Service;
     
-    @PostMapping
-    public ResponseEntity<${cls.name}Response> create(@Valid @RequestBody ${cls.name}Request request) {
-        ${cls.name}Response response = ${cls.name.toLowerCase()}Service.create(request);
-        return ResponseEntity.status(HttpStatus.CREATED).body(response);
-    }
+  @PostMapping
+  public ResponseEntity<${className}Response> create(@Valid @RequestBody ${className}Request request) {
+    ${className}Response response = ${className.toLowerCase()}Service.create(request);
+    return ResponseEntity.status(HttpStatus.CREATED).body(response);
+  }
     
-    @GetMapping("/{id}")
-    public ResponseEntity<${cls.name}Response> findById(@PathVariable Long id) {
-        ${cls.name}Response response = ${cls.name.toLowerCase()}Service.findById(id);
-        return ResponseEntity.ok(response);
-    }
+  @GetMapping("/{id}")
+  public ResponseEntity<${className}Response> findById(@PathVariable Long id) {
+    ${className}Response response = ${className.toLowerCase()}Service.findById(id);
+    return ResponseEntity.ok(response);
+  }
     
-    @GetMapping
-    public ResponseEntity<List<${cls.name}Response>> findAll() {
-        List<${cls.name}Response> responses = ${cls.name.toLowerCase()}Service.findAll();
-        return ResponseEntity.ok(responses);
-    }
+  @GetMapping
+  public ResponseEntity<List<${className}Response>> findAll() {
+    List<${className}Response> responses = ${className.toLowerCase()}Service.findAll();
+    return ResponseEntity.ok(responses);
+  }
     
-    @PutMapping("/{id}")
-    public ResponseEntity<${cls.name}Response> update(@PathVariable Long id, @Valid @RequestBody ${cls.name}Request request) {
-        ${cls.name}Response response = ${cls.name.toLowerCase()}Service.update(id, request);
-        return ResponseEntity.ok(response);
-    }
+  @PutMapping("/{id}")
+  public ResponseEntity<${className}Response> update(@PathVariable Long id, @Valid @RequestBody ${className}Request request) {
+    ${className}Response response = ${className.toLowerCase()}Service.update(id, request);
+    return ResponseEntity.ok(response);
+  }
     
-    @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable Long id) {
-        ${cls.name.toLowerCase()}Service.delete(id);
-        return ResponseEntity.noContent().build();
-    }
+  @DeleteMapping("/{id}")
+  public ResponseEntity<Void> delete(@PathVariable Long id) {
+    ${className.toLowerCase()}Service.delete(id);
+    return ResponseEntity.noContent().build();
+  }
 }`;
 
-    await fs.promises.writeFile(
-      path.join(packagePath, `${cls.name}Controller.java`),
-      controllerContent
-    );
+  await fs.promises.writeFile(
+    path.join(packagePath, `${className}Controller.java`),
+    controllerContent
+  );
   }
 }
 
@@ -823,7 +885,7 @@ async function generatePostmanCollection(projectDir: string, projectName: string
 
   for (const cls of classes) {
     const baseUrl = "{{baseUrl}}/api";
-    const className = cls.name.toLowerCase();
+    const className = toSafeName(toJavaClassName(cls.name));
 
     // Create folder for each entity
     const folder = {
