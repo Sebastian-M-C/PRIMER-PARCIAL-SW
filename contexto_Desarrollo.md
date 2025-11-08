@@ -1,4 +1,3 @@
-
 RESUMEN DE IMPLEMENTACIÓN - PROYECTO APLICACIÓN WEB COLABORATIVA UML
 
 CICLO 1: FUNCIONALIDADES BÁSICAS
@@ -94,7 +93,7 @@ NOTA: Priorizar implementación por ciclos, comenzando con funcionalidades bási
 
 # Contexto de Desarrollo — Estándares de Codificación
 
-Este documento define los estándares obligatorios que deben seguirse en todo el proyecto para mantener consistencia, claridad y calidad del código. Se aplican al backend (NestJS), frontend (React) y cualquier integración futura.
+Este documento define los estándares obligatorios que deben seguirse en todo el proyecto para mantener consistencia, claridad y calidad del código. Se aplican al backend (Node.js + Express con TypeScript), frontend (React) y cualquier integración futura.
 
 ## Principios generales
 - Priorizar legibilidad, evitar duplicación y favorecer la modularidad.
@@ -119,25 +118,26 @@ Validación: combinar class-validator/class-transformer con DTOs bien documentad
 - Mantener estructura modular: components/, pages/, hooks/, store/, services/.
 - Evitar componentes monolíticos; dividir en subcomponentes cuando la longitud o la complejidad aumente.
 
-## 4. Backend (NestJS) y APIs
-- El backend debe implementarse con NestJS y TypeScript.
-- Estructura modular basada en módulos, controladores, servicios y proveedores (Modules → Controllers → Services/Providers).
+## 4. Backend (Express) y APIs
+- El backend debe implementarse con Node.js (v20) + Express y TypeScript.
+- Estructura modular basada en carpetas: controllers, services, repositories (o models), middlewares y routes. Separar responsabilidades (rutas → controladores → servicios → persistencia).
 - Validación y transformación:
-  - Usar DTOs con class-validator y class-transformer.
-  - Aplicar Pipes para validación/global transform y Guards para autorización.
-- Convenciones de nombres en español: DTOs y clases en PascalCase (e.g., `UsuarioCrearDto`, `DiagramaServicio`), métodos y variables en camelCase (`obtenerDiagrama`, `validarEntrada`).
+  - Usar DTOs/typing en TypeScript y validar entrada con class-validator + class-transformer mediante middleware, o con express-validator/Joi según preferencia del equipo.
+  - Implementar middlewares para validación y transformación global cuando proceda.
+- Convenciones de nombres en español: DTOs y clases en PascalCase (ej.: `UsuarioCrearDto`, `DiagramaServicio`), métodos y variables en camelCase (`obtenerDiagrama`, `validarEntrada`).
 - Manejo de errores y excepciones:
-  - Implementar filtros de excepción (Exception Filters) y manejo centralizado de errores.
-  - Registrar errores con logger estructurado.
+  - Implementar un middleware centralizado de manejo de errores (error-handling middleware) y mapeo de errores a responses HTTP consistentes.
+  - Registrar errores con un logger estructurado (p. ej. Winston o Pino).
 - Persistencia:
-  - Usar migrations y seeders para esquemas/datos iniciales.
+  - Usar un ORM/QueryBuilder (por ejemplo Prisma o TypeORM) y definir estrategia de migrations y seeders (scripts en package.json para migraciones).
 - Documentación de API:
-  - Integrar Swagger (OpenAPI) con decoradores de NestJS para documentar endpoints.
+  - Integrar Swagger con swagger-jsdoc + swagger-ui-express para generar la documentación OpenAPI.
 - Seguridad y buenas prácticas:
-  - No exponer credenciales en el repo; usar variables de entorno.
-  - Proteger endpoints sensibles con Guards/JWT y aplicar rate-limiting si procede.
+  - No exponer credenciales en el repo; usar variables de entorno y/o vaults.
+  - Proteger endpoints sensibles con middlewares de autenticación (passport.js, express-jwt) y autorización; aplicar rate-limiting, CORS, y medidas de hardening según necesidad.
 - Pruebas:
   - Tests unitarios con Jest; tests e2e con SuperTest.
+  - Añadir linters y checks en CI (ESLint, Prettier, type-check).
 
 ## 5. Modularidad y tamaño de archivos
 - Ningún archivo debe exceder las 300 líneas de código. Si se supera, dividir en módulos o componentes adicionales.

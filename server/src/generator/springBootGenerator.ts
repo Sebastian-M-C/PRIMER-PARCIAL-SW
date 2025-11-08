@@ -3,49 +3,58 @@ import * as path from 'path';
 import archiver from 'archiver';
 import { UMLDiagramJSON } from '../types/uml';
 
+
+/**
+ * Genera un proyecto Spring Boot a partir de un diagrama UML.
+ * - Entrada: objeto UMLDiagramJSON que contiene package y clases.
+ * - Acción: crea estructura temporal, genera ficheros Java/Maven, empaqueta en ZIP y limpia temporales.
+ * - Salida: Buffer con el ZIP del proyecto.
+ * - Lado efecto: crea y elimina directorios en temp/.
+ */
+
 export async function generateSpringBootProject(umlData: UMLDiagramJSON): Promise<Buffer> {
   const projectName = umlData.package.split('.').pop() || 'generated-project';
   const basePackage = umlData.package;
-  
+
   // Create a temporary directory structure
   const tempDir = path.join(process.cwd(), 'temp', `spring-project-${Date.now()}`);
   const projectDir = path.join(tempDir, projectName);
-  
+
   try {
     // Create project structure
     await createProjectStructure(projectDir, basePackage);
-    
+
     // Generate Maven files
     await generateMavenFiles(projectDir, projectName, basePackage);
-    
+
     // Generate application properties
     await generateApplicationProperties(projectDir, basePackage);
-    
+
     // Generate entities
     await generateEntities(projectDir, basePackage, umlData.classes);
-    
+
     // Generate DTOs
     await generateDTOs(projectDir, basePackage, umlData.classes);
-    
+
     // Generate repositories
     await generateRepositories(projectDir, basePackage, umlData.classes);
-    
+
     // Generate services
     await generateServices(projectDir, basePackage, umlData.classes);
-    
+
     // Generate controllers
     await generateControllers(projectDir, basePackage, umlData.classes);
-    
-    
+
+
     // Generate Postman collection
     await generatePostmanCollection(projectDir, projectName, umlData.classes);
-    
+
     // Create ZIP file
     const zipBuffer = await createZipFile(projectDir, projectName);
-    
+
     // Clean up temporary directory
     await fs.promises.rm(tempDir, { recursive: true, force: true });
-    
+
     return zipBuffer;
   } catch (error) {
     // Clean up on error
@@ -54,12 +63,17 @@ export async function generateSpringBootProject(umlData: UMLDiagramJSON): Promis
   }
 }
 
+/**
+ * Crea la estructura de directorios estándar de un proyecto Spring Boot.
+ * - projectDir: ruta base del proyecto.
+ * - basePackage: paquete base Java (ej.: com.example.app) para derivar paths.
+ */
 async function createProjectStructure(projectDir: string, basePackage: string): Promise<void> {
   const packagePath = basePackage.replace(/\./g, '/');
   const srcMainJava = path.join(projectDir, 'src', 'main', 'java', packagePath);
   const srcMainResources = path.join(projectDir, 'src', 'main', 'resources');
   const srcTestJava = path.join(projectDir, 'src', 'test', 'java', packagePath);
-  
+
   const directories = [
     srcMainJava,
     path.join(srcMainJava, 'entity'),
@@ -73,11 +87,20 @@ async function createProjectStructure(projectDir: string, basePackage: string): 
     srcTestJava,
     path.join(projectDir, 'docs')
   ];
-  
+
   for (const dir of directories) {
     await fs.promises.mkdir(dir, { recursive: true });
   }
 }
+
+
+/**
+ * Genera el archivo pom.xml y la clase principal Application.java.
+ * - projectDir: ruta del proyecto.
+ * - projectName: nombre del artefacto Maven.
+ * - basePackage: paquete base Java.
+ */
+
 
 async function generateMavenFiles(projectDir: string, projectName: string, basePackage: string): Promise<void> {
   // pom.xml
@@ -228,6 +251,13 @@ public class ${projectName.charAt(0).toUpperCase() + projectName.slice(1)}Applic
   );
 }
 
+
+/**
+ * Crea el archivo application.properties con configuración por defecto.
+ * - projectDir: ruta del proyecto.
+ * - basePackage: usado para niveles de log.
+ */
+
 async function generateApplicationProperties(projectDir: string, basePackage: string): Promise<void> {
   const propertiesContent = `# Database Configuration
 spring.datasource.url=jdbc:postgresql://localhost:5432/umltool
@@ -263,10 +293,15 @@ spring.jackson.time-zone=UTC`;
     propertiesContent
   );
 }
-
+/**
+ * Genera archivos de entidades Java para cada clase UML.
+ * - projectDir: ruta del proyecto.
+ * - basePackage: paquete base Java.
+ * - classes: arreglo de definiciones de clase UML.
+ */
 async function generateEntities(projectDir: string, basePackage: string, classes: any[]): Promise<void> {
   const packagePath = path.join(projectDir, 'src', 'main', 'java', basePackage.replace(/\./g, '/'), 'entity');
-  
+
   for (const cls of classes) {
     const entityContent = generateEntityClass(basePackage, cls);
     await fs.promises.writeFile(
@@ -275,23 +310,43 @@ async function generateEntities(projectDir: string, basePackage: string, classes
     );
   }
 }
-
+/**
+ * Genera el contenido de la clase entidad Java a partir de la definición UML de una clase.
+ * - basePackage: paquete base.
+ * - cls: objeto con nombre, atributos y relaciones.
+ * - Retorna: string con el código Java de la entidad.
+ */
 function generateEntityClass(basePackage: string, cls: any): string {
   const hasId = cls.attributes?.some((attr: any) => attr.isId);
   const idAttribute = cls.attributes?.find((attr: any) => attr.isId);
-  
+
+  const imports = collectImportsForAttributes(cls.attributes);
+  // Always need List/ArrayList for relations
+  if (!imports.includes('import java.util.List;')) {
+    imports.push('import java.util.List;');
+  }
+  if (!imports.includes('import java.util.ArrayList;')) {
+    imports.push('import java.util.ArrayList;');
+  }
+
+  // Si no hay timestamps en los atributos, se van a generar createdAt/updatedAt:
+  // asegurar import de LocalDateTime para evitar error de "cannot find symbol"
+  const hasTimestampsAttr = cls.attributes?.some((attr: any) =>
+    attr.name === 'createdAt' || attr.name === 'updatedAt'
+  );
+  if (!hasTimestampsAttr && !imports.includes('import java.time.LocalDateTime;')) {
+    imports.push('import java.time.LocalDateTime;');
+  }
+
   let content = `package ${basePackage}.entity;
+
+${imports.join('\n')}
 
 import jakarta.persistence.*;
 import jakarta.validation.constraints.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
-
-import java.time.LocalDateTime;
-import java.math.BigDecimal;
-import java.util.ArrayList;
-import java.util.List;
 
 @Entity
 @Table(name = "${cls.name.toLowerCase()}s")
@@ -313,40 +368,35 @@ public class ${cls.name} {`;
   // Add attributes
   for (const attr of cls.attributes || []) {
     content += `\n\n    `;
-    
+
     // Add JPA annotations
     if (attr.isId) {
       content += `@Id\n    @GeneratedValue(strategy = GenerationType.IDENTITY)\n    `;
     }
-    
+
     if (attr.unique) {
       content += `@Column(unique = true)\n    `;
     }
-    
+
     if (!attr.nullable && !attr.isId) {
       content += `@NotNull\n    `;
     }
-    
+
     // Add validation annotations based on type
     if (attr.type === 'String' && !attr.nullable) {
       content += `@NotBlank\n    `;
     }
-    
+
     if (attr.type === 'String' && attr.name.toLowerCase().includes('email')) {
       content += `@Email\n    `;
     }
-    
+
     // Add field
     const javaType = mapTypeToJava(attr.type);
     content += `private ${javaType} ${attr.name};`;
   }
 
-  // Add timestamps if not present
-  const hasTimestamps = cls.attributes?.some((attr: any) => 
-    attr.name === 'createdAt' || attr.name === 'updatedAt'
-  );
-  
-  if (!hasTimestamps) {
+  if (!hasTimestampsAttr) {
     content += `
 
     @CreationTimestamp
@@ -364,13 +414,18 @@ public class ${cls.name} {`;
   }
 
   content += `\n}`;
-  
+
   return content;
 }
+/**
+ * Genera las anotaciones Java para relaciones entre entidades.
+ * - relation: objeto con type (ONE_TO_ONE, ONE_TO_MANY, etc.), target, mappedBy, joinColumn.
+ * - Retorna: snippet de código Java para insertar en la entidad.
+ */
 
 function generateRelationshipAnnotation(relation: any): string {
   let content = `\n\n    `;
-  
+
   switch (relation.type) {
     case 'ONE_TO_ONE':
       content += `@OneToOne`;
@@ -379,12 +434,12 @@ function generateRelationshipAnnotation(relation: any): string {
       }
       content += `\n    private ${relation.target} ${relation.target.toLowerCase()};`;
       break;
-      
+
     case 'ONE_TO_MANY':
       content += `@OneToMany(mappedBy = "${relation.mappedBy || 'id'}", cascade = CascadeType.ALL, fetch = FetchType.LAZY)\n    `;
       content += `private List<${relation.target}> ${relation.target.toLowerCase()}s = new ArrayList<>();`;
       break;
-      
+
     case 'MANY_TO_ONE':
       content += `@ManyToOne(fetch = FetchType.LAZY)\n    `;
       if (relation.joinColumn) {
@@ -394,20 +449,25 @@ function generateRelationshipAnnotation(relation: any): string {
       }
       content += `\n    private ${relation.target} ${relation.target.toLowerCase()};`;
       break;
-      
+
     case 'MANY_TO_MANY':
       content += `@ManyToMany(cascade = CascadeType.ALL, fetch = FetchType.LAZY)\n    `;
       content += `@JoinTable(\n        name = "${relation.target.toLowerCase()}_${relation.target.toLowerCase()}",\n        joinColumns = @JoinColumn(name = "id"),\n        inverseJoinColumns = @JoinColumn(name = "${relation.target.toLowerCase()}_id")\n    )\n    `;
       content += `private List<${relation.target}> ${relation.target.toLowerCase()}s = new ArrayList<>();`;
       break;
   }
-  
+
   return content;
 }
-
+/**
+ * Genera DTOs (Request/Response) para cada clase UML.
+ * - projectDir: ruta del proyecto.
+ * - basePackage: paquete base.
+ * - classes: definiciones UML.
+ */
 async function generateDTOs(projectDir: string, basePackage: string, classes: any[]): Promise<void> {
   const packagePath = path.join(projectDir, 'src', 'main', 'java', basePackage.replace(/\./g, '/'), 'dto');
-  
+
   for (const cls of classes) {
     // Request DTO
     const requestDtoContent = generateRequestDTO(basePackage, cls);
@@ -415,7 +475,7 @@ async function generateDTOs(projectDir: string, basePackage: string, classes: an
       path.join(packagePath, `${cls.name}Request.java`),
       requestDtoContent
     );
-    
+
     // Response DTO
     const responseDtoContent = generateResponseDTO(basePackage, cls);
     await fs.promises.writeFile(
@@ -425,36 +485,64 @@ async function generateDTOs(projectDir: string, basePackage: string, classes: an
   }
 }
 
+/**
+ * Devuelve imports Java necesarios según los tipos de atributos.
+ * - attrs: arreglo de atributos UML.
+ * - Retorna: array de líneas de import (sin duplicados).
+ */
+function collectImportsForAttributes(attrs: any[] = []): string[] {
+  const imports = new Set<string>();
+
+  for (const attr of attrs) {
+    const javaType = mapTypeToJava(attr.type);
+    switch (javaType) {
+      case 'LocalDateTime':
+        imports.add('import java.time.LocalDateTime;');
+        break;
+      case 'LocalDate':
+        imports.add('import java.time.LocalDate;');
+        break;
+      case 'LocalTime':
+        imports.add('import java.time.LocalTime;');
+        break;
+      case 'BigDecimal':
+        imports.add('import java.math.BigDecimal;');
+        break;
+      // Añadir más mapeos si se requieren imports específicos
+    }
+  }
+
+  return Array.from(imports);
+}
+
 function generateRequestDTO(basePackage: string, cls: any): string {
-  let content = `package ${basePackage}.dto;
+  const imports = collectImportsForAttributes(cls.attributes);
 
-import jakarta.validation.constraints.*;
-import lombok.*;
-import java.math.BigDecimal;
+  let content = `package ${basePackage}.dto;\n\n`;
 
-@Data
-@NoArgsConstructor
-@AllArgsConstructor
-@Builder
-public class ${cls.name}Request {`;
+  if (imports.length) {
+    content += imports.join('\n') + '\n\n';
+  }
+
+  content += `import jakarta.validation.constraints.*;\nimport lombok.*;\n\n@Data\n@NoArgsConstructor\n@AllArgsConstructor\n@Builder\npublic class ${cls.name}Request {`;
 
   for (const attr of cls.attributes || []) {
     if (attr.isId) continue; // Skip ID in request DTO
-    
+
     content += `\n\n    `;
-    
+
     if (!attr.nullable) {
       content += `@NotNull\n    `;
     }
-    
+
     if (attr.type === 'String' && !attr.nullable) {
       content += `@NotBlank\n    `;
     }
-    
+
     if (attr.type === 'String' && attr.name.toLowerCase().includes('email')) {
       content += `@Email\n    `;
     }
-    
+
     const javaType = mapTypeToJava(attr.type);
     content += `private ${javaType} ${attr.name};`;
   }
@@ -463,18 +551,23 @@ public class ${cls.name}Request {`;
   return content;
 }
 
+/**
+ * Genera el contenido del DTO de petición (Request) para una clase.
+ * - basePackage: paquete base.
+ * - cls: definición de clase UML.
+ * - Retorna: string con código Java del DTO de request.
+ */
+
 function generateResponseDTO(basePackage: string, cls: any): string {
-  let content = `package ${basePackage}.dto;
+  const imports = collectImportsForAttributes(cls.attributes);
 
-import lombok.*;
-import java.time.LocalDateTime;
-import java.math.BigDecimal;
+  let content = `package ${basePackage}.dto;\n\n`;
 
-@Data
-@NoArgsConstructor
-@AllArgsConstructor
-@Builder
-public class ${cls.name}Response {`;
+  if (imports.length) {
+    content += imports.join('\n') + '\n\n';
+  }
+
+  content += `import lombok.*;\n\n@Data\n@NoArgsConstructor\n@AllArgsConstructor\n@Builder\npublic class ${cls.name}Response {`;
 
   for (const attr of cls.attributes || []) {
     content += `\n\n    `;
@@ -485,10 +578,15 @@ public class ${cls.name}Response {`;
   content += `\n}`;
   return content;
 }
-
+/**
+ * Genera interfaces de repositorio (JpaRepository) para cada entidad.
+ * - projectDir: ruta del proyecto.
+ * - basePackage: paquete base.
+ * - classes: definiciones UML.
+ */
 async function generateRepositories(projectDir: string, basePackage: string, classes: any[]): Promise<void> {
   const packagePath = path.join(projectDir, 'src', 'main', 'java', basePackage.replace(/\./g, '/'), 'repository');
-  
+
   for (const cls of classes) {
     const repositoryContent = `package ${basePackage}.repository;
 
@@ -514,11 +612,16 @@ public interface ${cls.name}Repository extends JpaRepository<${cls.name}, Long> 
     );
   }
 }
-
+/**
+ * Genera interfaces de servicio y sus implementaciones para cada entidad.
+ * - projectDir: ruta del proyecto.
+ * - basePackage: paquete base.
+ * - classes: definiciones UML.
+ */
 async function generateServices(projectDir: string, basePackage: string, classes: any[]): Promise<void> {
   const servicePackagePath = path.join(projectDir, 'src', 'main', 'java', basePackage.replace(/\./g, '/'), 'service');
   const implPackagePath = path.join(servicePackagePath, 'impl');
-  
+
   for (const cls of classes) {
     // Service interface
     const serviceContent = `package ${basePackage}.service;
@@ -544,7 +647,7 @@ public interface ${cls.name}Service {
       path.join(servicePackagePath, `${cls.name}Service.java`),
       serviceContent
     );
-    
+
     // Service implementation
     const serviceImplContent = `package ${basePackage}.service.impl;
 
@@ -630,9 +733,16 @@ public class ${cls.name}ServiceImpl implements ${cls.name}Service {
   }
 }
 
+/**
+ * Genera controladores REST para cada entidad.
+ * - projectDir: ruta del proyecto.
+ * - basePackage: paquete base.
+ * - classes: definiciones UML.
+ */
+
 async function generateControllers(projectDir: string, basePackage: string, classes: any[]): Promise<void> {
   const packagePath = path.join(projectDir, 'src', 'main', 'java', basePackage.replace(/\./g, '/'), 'controller');
-  
+
   for (const cls of classes) {
     const controllerContent = `package ${basePackage}.controller;
 
@@ -693,6 +803,13 @@ public class ${cls.name}Controller {
   }
 }
 
+/**
+ * Genera una colección Postman (JSON) con endpoints CRUD para cada entidad.
+ * - projectDir: ruta del proyecto.
+ * - projectName: nombre del proyecto/colección.
+ * - classes: definiciones UML.
+ */
+
 
 async function generatePostmanCollection(projectDir: string, projectName: string, classes: any[]): Promise<void> {
   const collection: any = {
@@ -707,7 +824,7 @@ async function generatePostmanCollection(projectDir: string, projectName: string
   for (const cls of classes) {
     const baseUrl = "{{baseUrl}}/api";
     const className = cls.name.toLowerCase();
-    
+
     // Create folder for each entity
     const folder = {
       name: cls.name,
@@ -789,7 +906,7 @@ async function generatePostmanCollection(projectDir: string, projectName: string
         }
       ]
     };
-    
+
     collection.item.push(folder);
   }
 
@@ -816,13 +933,18 @@ async function generatePostmanCollection(projectDir: string, projectName: string
     JSON.stringify(collection, null, 2)
   );
 }
-
+/**
+ * Genera un JSON de ejemplo para un DTO a partir de la definición de atributos.
+ * - cls: definición UML de la clase.
+ * - includeId: si incluye el campo ID en el ejemplo.
+ * - Retorna: string con JSON formateado.
+ */
 function generateSampleJson(cls: any, includeId: boolean = true): string {
   const sample: any = {};
-  
+
   for (const attr of cls.attributes || []) {
     if (attr.isId && !includeId) continue;
-    
+
     switch (attr.type) {
       case 'String':
         sample[attr.name] = `Sample ${attr.name}`;
@@ -844,14 +966,19 @@ function generateSampleJson(cls: any, includeId: boolean = true): string {
         sample[attr.name] = `Sample ${attr.name}`;
     }
   }
-  
+
   return JSON.stringify(sample, null, 2);
 }
+/**
+ * Mapea tipos del UML a tipos Java conocidos.
+ * - type: cadena con el tipo UML.
+ * - Retorna: tipo Java como string (por defecto 'String' y log de advertencia).
+ */
 
 function mapTypeToJava(type: string): string {
   // Normalize the type string
   const normalizedType = type?.trim() || '';
-  
+
   const typeMap: { [key: string]: string } = {
     'String': 'String',
     'Long': 'Long',
@@ -876,12 +1003,12 @@ function mapTypeToJava(type: string): string {
     'URL': 'String',
     'UUID': 'String'
   };
-  
+
   // Check for exact match first
   if (typeMap[normalizedType]) {
     return typeMap[normalizedType];
   }
-  
+
   // Check for case-insensitive match
   const lowerType = normalizedType.toLowerCase();
   for (const [key, value] of Object.entries(typeMap)) {
@@ -889,57 +1016,80 @@ function mapTypeToJava(type: string): string {
       return value;
     }
   }
-  
+
   // Handle unknown types - default to String to avoid compilation errors
   console.warn(`Unknown type "${type}" mapped to String`);
   return 'String';
 }
 
+/**
+ * Genera las líneas del builder para crear la entidad desde el request.
+ * - cls: definición UML de la clase.
+ * - Retorna: string con llamadas al builder (.field(request.getX())).
+ */
+
+
 function generateBuilderFieldsForEntity(cls: any): string {
   let fields = '';
-  
+
   for (const attr of cls.attributes || []) {
     if (attr.isId) continue; // Skip ID for entity creation
-    
+
     fields += `\n                .${attr.name}(request.get${attr.name.charAt(0).toUpperCase() + attr.name.slice(1)}())`;
   }
-  
+
   return fields;
 }
+
+/**
+ * Genera las líneas del builder para el DTO de respuesta a partir de la entidad.
+ * - cls: definición UML.
+ * - Retorna: string con llamadas al builder (.field(entity.getX())).
+ */
 
 function generateBuilderFieldsForResponse(cls: any): string {
   let fields = '';
-  
+
   for (const attr of cls.attributes || []) {
     fields += `\n                .${attr.name}(entity.get${attr.name.charAt(0).toUpperCase() + attr.name.slice(1)}())`;
   }
-  
+
   return fields;
 }
-
+/**
+ * Genera el código para actualizar los campos de la entidad con valores del request si no son nulos.
+ * - cls: definición UML.
+ * - Retorna: snippet Java para updateEntity.
+ */
 function generateUpdateFieldsForEntity(cls: any): string {
   let fields = '';
-  
+
   for (const attr of cls.attributes || []) {
     if (attr.isId) continue;
-    
+
     fields += `\n        if (request.get${attr.name.charAt(0).toUpperCase() + attr.name.slice(1)}() != null) {
             entity.set${attr.name.charAt(0).toUpperCase() + attr.name.slice(1)}(request.get${attr.name.charAt(0).toUpperCase() + attr.name.slice(1)}());
         }`;
   }
-  
+
   return fields;
 }
-
+/**
+ * Empaqueta el proyecto en un ZIP en memoria.
+ * - projectDir: ruta del proyecto a comprimir.
+ * - projectName: nombre raíz dentro del ZIP.
+ * - Retorna: Promise<Buffer> con el contenido del ZIP.
+ * - Nota: acumula en memoria; para proyectos grandes considerar stream a disco/response.
+ */
 async function createZipFile(projectDir: string, projectName: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     const archive = archiver('zip', { zlib: { level: 9 } });
-    
+
     archive.on('data', (chunk: Buffer) => chunks.push(chunk));
     archive.on('end', () => resolve(Buffer.concat(chunks)));
     archive.on('error', reject);
-    
+
     archive.directory(projectDir, projectName);
     archive.finalize();
   });
