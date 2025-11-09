@@ -37,6 +37,7 @@ export interface UMLActionResponse {
 export interface ModifyDiagramResult {
   actions: UMLAction[];
   updatedDiagram?: any;
+  warnings?: string[];
 }
 
 /**
@@ -79,7 +80,8 @@ export async function modifyDiagram(text: string, diagram: any, opts?: { baseUrl
 
   return {
     actions: data.actions as UMLAction[],
-    updatedDiagram: data.updatedDiagram
+    updatedDiagram: data.updatedDiagram,
+    warnings: data.warnings || []
   };
 }
 

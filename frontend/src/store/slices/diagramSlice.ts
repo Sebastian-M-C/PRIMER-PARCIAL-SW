@@ -13,11 +13,36 @@ export const createDiagramSlice = (set: any, get: any) => ({
   // estado por defecto del diagrama (si no se inyecta desde el store principal)
   diagram: null as UMLDiagram | null,
 
-  setDiagram: (diagram: UMLDiagram) => set({ diagram }),
+  setDiagram: (diagram: UMLDiagram) => {
+    // Eliminar duplicados por ID antes de establecer el diagrama
+    const uniqueClasses = Array.from(
+      new Map(diagram.classes.map(cls => [cls.id, cls])).values()
+    );
+    const uniqueRelations = Array.from(
+      new Map(diagram.relations.map(rel => [rel.id, rel])).values()
+    );
+    
+    const cleanedDiagram: UMLDiagram = {
+      ...diagram,
+      classes: uniqueClasses,
+      relations: uniqueRelations
+    };
+    
+    set({ diagram: cleanedDiagram });
+  },
 
-  addClass: (umlClass: UMLClass) => set((state: any) => ({
-    diagram: state.diagram ? { ...state.diagram, classes: [...state.diagram.classes, umlClass] } : null
-  })),
+  addClass: (umlClass: UMLClass) => set((state: any) => {
+    if (!state.diagram) return { diagram: null };
+    
+    // Verificar que no exista una clase con el mismo ID
+    const existingClass = state.diagram.classes.find((cls: UMLClass) => cls.id === umlClass.id);
+    if (existingClass) {
+      console.warn(`Clase con ID duplicado ignorada: ${umlClass.id}`);
+      return { diagram: state.diagram };
+    }
+    
+    return { diagram: { ...state.diagram, classes: [...state.diagram.classes, umlClass] } };
+  }),
 
   updateClass: (id: string, updates: Partial<UMLClass>) => set((state: any) => ({
     diagram: state.diagram ? {

@@ -15,21 +15,22 @@ export function serializeDiagram(diagram: UMLDiagram) {
   }));
 
   const relationsForExport = (diagram.relations || []).map(rel => {
-    const sourceClass = diagram.classes.find(c => c.id === rel.source) || diagram.classes.find(c => c.name === rel.source);
-    const targetClass = diagram.classes.find(c => c.id === rel.target) || diagram.classes.find(c => c.name === rel.target);
+    // Buscar clases por ID (el formato interno usa IDs)
+    const sourceClass = diagram.classes.find(c => c.id === rel.source);
+    const targetClass = diagram.classes.find(c => c.id === rel.target);
 
+    // Para el backend, usar nombres de clases en lugar de IDs
+    // El backend espera nombres de clases en 'source' y 'target'
     return {
       id: rel.id || `relation-${Date.now()}`,
       type: rel.type,
-      sourceId: sourceClass?.id || rel.source,
-      sourceName: sourceClass?.name || rel.sourceName || sourceClass?.id || rel.source,
-      targetId: targetClass?.id || rel.target,
-      targetName: targetClass?.name || rel.targetName || targetClass?.id || rel.target,
-      sourceCardinality: rel.sourceCardinality || null,
-      targetCardinality: rel.targetCardinality || null,
-      mappedBy: rel.mappedBy || null,
-      joinColumn: rel.joinColumn || null,
-      label: rel.label || null
+      source: sourceClass?.name || rel.source, // Usar nombre de clase para el backend
+      target: targetClass?.name || rel.target, // Usar nombre de clase para el backend
+      sourceCardinality: rel.sourceCardinality || '1',
+      targetCardinality: rel.targetCardinality || '*',
+      mappedBy: rel.mappedBy || undefined,
+      joinColumn: rel.joinColumn || undefined,
+      label: rel.label || undefined
     };
   });
 

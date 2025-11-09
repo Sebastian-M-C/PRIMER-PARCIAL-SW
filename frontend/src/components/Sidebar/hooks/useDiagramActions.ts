@@ -150,8 +150,17 @@ export function useDiagramActions() {
     const existingNames = diagram.classes.map((c: UMLClass) => c.name);
     const uniqueName = generateUniqueClassName(existingNames);
 
+    // Generar ID único verificando que no exista
+    const existingIds = new Set(diagram.classes.map((c: UMLClass) => c.id));
+    let newId = `class-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    let attempts = 0;
+    while (existingIds.has(newId) && attempts < 10) {
+      newId = `class-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      attempts++;
+    }
+
     const newClass: UMLClass = {
-      id: `class-${Date.now()}`,
+      id: newId,
       name: uniqueName,
       attributes: [],
       methods: [],
@@ -329,11 +338,189 @@ export function useDiagramActions() {
   };
 
   /**
+   * Convierte un diagrama del backend al formato del frontend
+   * - Mapea nombres de clases a IDs existentes
+   * - Preserva posiciones y dimensiones de clases existentes
+   * - Genera IDs únicos para nuevas clases
+   * - Normaliza relaciones con cardinalidades y campos opcionales
+   * - Elimina duplicados por ID
+   */
+  const convertBackendDiagramToFrontend = (backendDiagram: any, currentDiagram: UMLDiagram): UMLDiagram => {
+    // Crear mapas de nombres a IDs para clases existentes
+    const nameToIdMap = new Map<string, string>();
+    const idToClassMap = new Map<string, UMLClass>();
+    const usedIds = new Set<string>(); // Rastrear IDs usados para evitar duplicados
+    
+    currentDiagram.classes.forEach(cls => {
+      nameToIdMap.set(cls.name, cls.id);
+      idToClassMap.set(cls.id, cls);
+      usedIds.add(cls.id);
+    });
+
+    // Función para generar un ID único
+    const generateUniqueId = (baseId: string, index: number): string => {
+      if (!baseId || usedIds.has(baseId)) {
+        // Generar nuevo ID único
+        let newId = `ai-class-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`;
+        let attempts = 0;
+        while (usedIds.has(newId) && attempts < 10) {
+          newId = `ai-class-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`;
+          attempts++;
+        }
+        return newId;
+      }
+      return baseId;
+    };
+
+    // Convertir clases del backend
+    const convertedClasses: UMLClass[] = [];
+    const processedNames = new Set<string>(); // Evitar procesar la misma clase dos veces
+    
+    (backendDiagram.classes || []).forEach((cls: any, index: number) => {
+      // Evitar procesar clases duplicadas por nombre
+      if (processedNames.has(cls.name)) {
+        console.warn(`Clase duplicada ignorada: ${cls.name}`);
+        return;
+      }
+      processedNames.add(cls.name);
+
+      // Buscar si la clase ya existe por nombre
+      const existingId = nameToIdMap.get(cls.name);
+      const existingClass = existingId ? idToClassMap.get(existingId) : null;
+
+      // Si existe, preservar posición y dimensiones, actualizar atributos/métodos
+      if (existingClass) {
+        const updatedClass: UMLClass = {
+          ...existingClass,
+          name: cls.name,
+          attributes: cls.attributes || [],
+          methods: cls.methods || []
+        };
+        convertedClasses.push(updatedClass);
+        usedIds.add(existingClass.id);
+        return;
+      }
+
+      // Si no existe, es una nueva clase - generar ID único y posición
+      const freePosition = findFreePosition({ classes: currentDiagram.classes });
+      const newId = generateUniqueId(cls.id, index);
+      const newClass: UMLClass = {
+        id: newId,
+        name: cls.name || `Class${index + 1}`,
+        attributes: cls.attributes || [],
+        methods: cls.methods || [],
+        position: cls.position || { 
+          x: freePosition.x + (index * 250), 
+          y: freePosition.y + (index % 2) * 200 
+        },
+        width: cls.width || 200,
+        height: cls.height || 100
+      };
+      
+      convertedClasses.push(newClass);
+      usedIds.add(newId);
+      nameToIdMap.set(newClass.name, newClass.id);
+      idToClassMap.set(newClass.id, newClass);
+    });
+
+    // Eliminar duplicados por ID (por si acaso)
+    const uniqueClasses = Array.from(
+      new Map(convertedClasses.map(cls => [cls.id, cls])).values()
+    );
+
+    // Convertir relaciones del backend
+    const convertedRelations: UMLRelation[] = (backendDiagram.relations || []).map((rel: any, index: number) => {
+      // Resolver source y target (pueden ser nombres o IDs)
+      const sourceKey = rel.source || rel.sourceClassName || rel.sourceName;
+      const targetKey = rel.target || rel.targetClassName || rel.targetName;
+      
+      const sourceId = nameToIdMap.get(sourceKey) || sourceKey;
+      const targetId = nameToIdMap.get(targetKey) || targetKey;
+
+      // Validar que ambos IDs existan
+      if (!idToClassMap.has(sourceId) || !idToClassMap.has(targetId)) {
+        console.warn(`Relación inválida: source=${sourceKey} (${sourceId}), target=${targetKey} (${targetId})`);
+        return null;
+      }
+
+      // Normalizar tipo de relación
+      const validTypes = ['ONE_TO_ONE', 'ONE_TO_MANY', 'MANY_TO_ONE', 'MANY_TO_MANY', 'INHERITANCE', 'COMPOSITION', 'AGGREGATION'];
+      let relationType = (rel.type || 'ONE_TO_MANY').toUpperCase();
+      if (!validTypes.includes(relationType)) {
+        relationType = 'ONE_TO_MANY';
+      }
+
+      // Determinar cardinalidades: usar las proporcionadas o valores por defecto según el tipo
+      let sourceCardinality: string;
+      let targetCardinality: string;
+      
+      // Si el backend proporcionó cardinalidades, usarlas
+      if (rel.sourceCardinality && rel.targetCardinality) {
+        sourceCardinality = rel.sourceCardinality;
+        targetCardinality = rel.targetCardinality;
+      } else {
+        // Si no se proporcionan, usar valores por defecto según el tipo
+        switch (relationType) {
+          case 'ONE_TO_ONE':
+            sourceCardinality = '1';
+            targetCardinality = '1';
+            break;
+          case 'ONE_TO_MANY':
+            sourceCardinality = '1';
+            targetCardinality = '*';
+            break;
+          case 'MANY_TO_ONE':
+            sourceCardinality = '*';
+            targetCardinality = '1';
+            break;
+          case 'MANY_TO_MANY':
+            sourceCardinality = '*';
+            targetCardinality = '*';
+            break;
+          case 'INHERITANCE':
+          case 'COMPOSITION':
+          case 'AGGREGATION':
+            // Para herencia/composición/agregación: source (hijo/parte) tiene cardinalidad 1, target (padre/todo) tiene *
+            sourceCardinality = '1';
+            targetCardinality = '*';
+            break;
+          default:
+            sourceCardinality = '1';
+            targetCardinality = '*';
+        }
+      }
+
+      return {
+        id: rel.id || `ai-relation-${Date.now()}-${index}`,
+        type: relationType as UMLRelation['type'],
+        source: sourceId,
+        target: targetId,
+        sourceCardinality,
+        targetCardinality,
+        mappedBy: rel.mappedBy || undefined,
+        joinColumn: rel.joinColumn || undefined,
+        label: rel.label || rel.sourceLabel || rel.targetLabel || undefined
+      } as UMLRelation;
+    }).filter((rel: UMLRelation | null): rel is UMLRelation => rel !== null);
+
+    // Crear diagrama convertido con clases únicas
+    return {
+      id: currentDiagram.id,
+      name: backendDiagram.name || currentDiagram.name,
+      package: backendDiagram.package || currentDiagram.package,
+      classes: uniqueClasses,
+      relations: convertedRelations,
+      createdAt: currentDiagram.createdAt,
+      updatedAt: new Date()
+    } as UMLDiagram;
+  };
+
+  /**
    * IA Modificar
    *
    * - Pide una instrucción al usuario (prompt sencillo).
    * - Llama al servicio modifyDiagram(text, diagram).
-   * - Si el servidor devuelve `updatedDiagram`, lo aplica en el store.
+   * - Si el servidor devuelve `updatedDiagram`, lo convierte y aplica en el store.
    * - Si solo devuelve `actions`, muestra las acciones propuestas.
    */
   const handleAIModify = async () => {
@@ -342,21 +529,46 @@ export function useDiagramActions() {
       return;
     }
 
-    const instruction = prompt('Ingrese instrucción para IA (ej: "añade email a la clase Usuario")');
+    const instruction = prompt('Ingrese instrucción para IA (ej: "añade email a la clase Usuario", "crea relación de herencia entre Empleado y Persona")');
     if (!instruction) return;
 
     try {
-      // opcional: mostrar spinner / estado de generación
-      const result = await modifyDiagram(instruction, diagram);
+      // Serializar diagrama para enviar al backend (sin posiciones/dimensiones)
+      const serializedDiagram = serializeDiagram(diagram);
+      
+      // Llamar al servicio
+      const result = await modifyDiagram(instruction, serializedDiagram);
+      
+      // Mostrar warnings si existen
+      if (result.warnings && result.warnings.length > 0) {
+        console.warn('Warnings de IA:', result.warnings);
+      }
+
       if (result.updatedDiagram) {
-        setDiagram(result.updatedDiagram);
+        // Convertir diagrama del backend al formato del frontend
+        const convertedDiagram = convertBackendDiagramToFrontend(result.updatedDiagram, diagram);
+        
+        // Aplicar diagrama convertido
+        setDiagram(convertedDiagram);
         if (typeof selectClass === 'function') selectClass(null);
         if (typeof selectRelation === 'function') selectRelation(null);
-        alert('✅ Diagrama actualizado por IA');
+        
+        // Mostrar mensaje de éxito con información adicional
+        let successMsg = '✅ Diagrama actualizado por IA';
+        if (result.warnings && result.warnings.length > 0) {
+          successMsg += `\n\n⚠️ Advertencias: ${result.warnings.length}`;
+        }
+        if (result.actions && result.actions.length > 0) {
+          successMsg += `\n\n📝 Acciones aplicadas: ${result.actions.length}`;
+        }
+        alert(successMsg);
       } else if (result.actions && result.actions.length > 0) {
-        // Si el servidor no aplicó las acciones, notificamos al usuario.
-        // Puedes mejorar aplicando las acciones localmente o pidiendo al servidor que persista.
-        alert(`La IA propone las siguientes acciones:\n\n${JSON.stringify(result.actions, null, 2)}\n\nEl servidor no devolvió el diagrama actualizado automáticamente.`);
+        // Si el servidor no aplicó las acciones, mostrar propuesta
+        const actionsSummary = result.actions.map((a, i) => 
+          `${i + 1}. ${a.type}${a.reason ? ` - ${a.reason}` : ''}`
+        ).join('\n');
+        
+        alert(`La IA propone las siguientes acciones:\n\n${actionsSummary}\n\nEl servidor no devolvió el diagrama actualizado automáticamente.`);
       } else {
         alert('La IA no devolvió acciones ni diagrama actualizado.');
       }
@@ -464,45 +676,73 @@ export function useDiagramActions() {
       const sourceId = nameToIdMap.get(sourceKey) || sourceKey;
       const targetId = nameToIdMap.get(targetKey) || targetKey;
 
-      // Determinar cardinalidades basadas en el tipo
-      let typeStr = (rel.type || 'association').toUpperCase();
+      // Normalizar tipo de relación
+      const validTypes = ['ONE_TO_ONE', 'ONE_TO_MANY', 'MANY_TO_ONE', 'MANY_TO_MANY', 'INHERITANCE', 'COMPOSITION', 'AGGREGATION'];
+      let typeStr = (rel.type || 'ONE_TO_MANY').toUpperCase();
       
-      // Normalizar tipos comunes del API
-      if (typeStr.includes('INHERITANCE') || typeStr.includes('EXTENDS')) {
+      // Normalizar tipos comunes del API (pueden venir con variaciones)
+      if (typeStr.includes('INHERITANCE') || typeStr.includes('EXTENDS') || typeStr.includes('INHERIT')) {
         typeStr = 'INHERITANCE';
-      } else if (typeStr.includes('COMPOSITION')) {
+      } else if (typeStr.includes('COMPOSITION') || typeStr.includes('COMPOSE')) {
         typeStr = 'COMPOSITION';
-      } else if (typeStr.includes('AGGREGATION')) {
+      } else if (typeStr.includes('AGGREGATION') || typeStr.includes('AGGREGATE')) {
         typeStr = 'AGGREGATION';
-      } else if (typeStr.includes('ONE_TO_MANY') || typeStr === 'ONE_TO_MANY') {
+      } else if (typeStr === 'ONE_TO_MANY' || typeStr.includes('ONE_TO_MANY')) {
         typeStr = 'ONE_TO_MANY';
-      } else if (typeStr.includes('MANY_TO_ONE') || typeStr === 'MANY_TO_ONE') {
+      } else if (typeStr === 'MANY_TO_ONE' || typeStr.includes('MANY_TO_ONE')) {
         typeStr = 'MANY_TO_ONE';
-      } else if (typeStr.includes('MANY_TO_MANY') || typeStr === 'MANY_TO_MANY') {
+      } else if (typeStr === 'MANY_TO_MANY' || typeStr.includes('MANY_TO_MANY')) {
         typeStr = 'MANY_TO_MANY';
-      } else if (typeStr.includes('ONE_TO_ONE') || typeStr === 'ONE_TO_ONE') {
+      } else if (typeStr === 'ONE_TO_ONE' || typeStr.includes('ONE_TO_ONE')) {
         typeStr = 'ONE_TO_ONE';
       } else {
         // Por defecto, usar ONE_TO_MANY
         typeStr = 'ONE_TO_MANY';
       }
-
-      // Determinar cardinalidades basadas en el tipo
-      let sourceCardinality = '1';
-      let targetCardinality = '1';
       
-      if (typeStr === 'ONE_TO_MANY') {
-        sourceCardinality = '1';
-        targetCardinality = '*';
-      } else if (typeStr === 'MANY_TO_ONE') {
-        sourceCardinality = '*';
-        targetCardinality = '1';
-      } else if (typeStr === 'MANY_TO_MANY') {
-        sourceCardinality = '*';
-        targetCardinality = '*';
-      } else if (typeStr === 'ONE_TO_ONE') {
-        sourceCardinality = '1';
-        targetCardinality = '1';
+      // Validar que el tipo sea válido
+      if (!validTypes.includes(typeStr)) {
+        typeStr = 'ONE_TO_MANY';
+      }
+
+      // Determinar cardinalidades: usar las proporcionadas o valores por defecto según el tipo
+      let sourceCardinality: string;
+      let targetCardinality: string;
+      
+      // Si el API proporcionó cardinalidades, usarlas
+      if (rel.sourceCardinality && rel.targetCardinality) {
+        sourceCardinality = rel.sourceCardinality;
+        targetCardinality = rel.targetCardinality;
+      } else {
+        // Si no se proporcionan, usar valores por defecto según el tipo
+        switch (typeStr) {
+          case 'ONE_TO_ONE':
+            sourceCardinality = '1';
+            targetCardinality = '1';
+            break;
+          case 'ONE_TO_MANY':
+            sourceCardinality = '1';
+            targetCardinality = '*';
+            break;
+          case 'MANY_TO_ONE':
+            sourceCardinality = '*';
+            targetCardinality = '1';
+            break;
+          case 'MANY_TO_MANY':
+            sourceCardinality = '*';
+            targetCardinality = '*';
+            break;
+          case 'INHERITANCE':
+          case 'COMPOSITION':
+          case 'AGGREGATION':
+            // Para herencia/composición/agregación: source (hijo/parte) tiene cardinalidad 1, target (padre/todo) tiene *
+            sourceCardinality = '1';
+            targetCardinality = '*';
+            break;
+          default:
+            sourceCardinality = '1';
+            targetCardinality = '*';
+        }
       }
 
       return {

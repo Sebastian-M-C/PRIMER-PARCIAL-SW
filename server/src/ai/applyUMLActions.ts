@@ -16,6 +16,33 @@ function genId(prefix = 'rel'): string {
 }
 
 /**
+ * Obtiene la cardinalidad por defecto según el tipo de relación y la posición (source/target)
+ */
+function getDefaultCardinality(relationType: string, position: 'source' | 'target'): string {
+  switch (relationType) {
+    case 'ONE_TO_ONE':
+      return '1';
+    case 'ONE_TO_MANY':
+      return position === 'source' ? '1' : '*';
+    case 'MANY_TO_ONE':
+      return position === 'source' ? '*' : '1';
+    case 'MANY_TO_MANY':
+      return '*';
+    case 'INHERITANCE':
+      // Herencia: una clase padre puede tener muchas hijas, una hija tiene un padre
+      return position === 'source' ? '1' : '*';
+    case 'COMPOSITION':
+      // Composición: el todo tiene muchas partes, la parte pertenece a un todo
+      return position === 'source' ? '1' : '*';
+    case 'AGGREGATION':
+      // Agregación: similar a composición pero más débil
+      return position === 'source' ? '1' : '*';
+    default:
+      return '*';
+  }
+}
+
+/**
  * applyActionsToDiagram
  * ---------------------
  * Aplica una lista de acciones (propuestas por la AI) sobre una copia del
@@ -109,12 +136,39 @@ export function applyActionsToDiagram(currentDiagram: any, actions: any[]): any 
           break;
         }
 
-        rel.id = rel.id || genId('rel');
-        rel.source = resolvedSource;
-        rel.target = resolvedTarget;
+        // Validar que el tipo de relación sea válido
+        const validTypes = ['ONE_TO_ONE', 'ONE_TO_MANY', 'MANY_TO_ONE', 'MANY_TO_MANY', 'INHERITANCE', 'COMPOSITION', 'AGGREGATION'];
+        if (!rel.type || !validTypes.includes(rel.type)) {
+          warnings.push(`CREATE_RELATION skipped: invalid relation type '${rel.type}'. Valid types: ${validTypes.join(', ')}`);
+          break;
+        }
 
-        const exists = diagram.relations.some((r: any) => r.source === rel.source && r.target === rel.target && r.type === rel.type);
-        if (!exists) diagram.relations.push(rel);
+        // Construir relación completa con todos los campos requeridos
+        const newRelation: any = {
+          id: rel.id || genId('rel'),
+          type: rel.type,
+          source: resolvedSource,
+          target: resolvedTarget,
+          // Cardinalidades: usar valores por defecto si no se proporcionan
+          sourceCardinality: rel.sourceCardinality || getDefaultCardinality(rel.type, 'source'),
+          targetCardinality: rel.targetCardinality || getDefaultCardinality(rel.type, 'target'),
+        };
+
+        // Campos opcionales
+        if (rel.mappedBy) newRelation.mappedBy = rel.mappedBy;
+        if (rel.joinColumn) newRelation.joinColumn = rel.joinColumn;
+        if (rel.label) newRelation.label = rel.label;
+
+        // Verificar si ya existe una relación idéntica
+        const exists = diagram.relations.some((r: any) => 
+          r.source === newRelation.source && 
+          r.target === newRelation.target && 
+          r.type === newRelation.type
+        );
+        
+        if (!exists) {
+          diagram.relations.push(newRelation);
+        }
         break;
       }
 

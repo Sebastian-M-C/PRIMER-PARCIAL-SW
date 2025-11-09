@@ -29,13 +29,28 @@ const DIAGRAM_SYSTEM_PROMPT = `Eres un experto en diseño UML y arquitectura de 
 INSTRUCCIONES CRÍTICAS:
 - Responde ÚNICAMENTE en español
 - Analiza la descripción del usuario y extrae todas las clases mencionadas
-- Identifica las relaciones entre las clases (uno a uno, uno a muchos, muchos a muchos)
+- Identifica las relaciones entre las clases usando los tipos apropiados
 - Genera atributos apropiados para cada clase basándote en el contexto
 - Incluye métodos comunes (guardar, buscar, eliminar) para cada clase
 - Usa tipos Java apropiados (String, Long, Integer, Boolean, LocalDateTime, BigDecimal)
 - Nombres en camelCase para atributos y métodos, PascalCase para clases
 - Siempre incluye un campo 'id' como clave primaria en cada clase
 - Para relaciones, genera IDs únicos y etiquetas descriptivas
+
+TIPOS DE RELACIONES UML SOPORTADAS:
+1. ONE_TO_ONE: Relación uno a uno (ej: Usuario tiene un Perfil)
+2. ONE_TO_MANY: Relación uno a muchos (ej: Usuario tiene muchos Pedidos)
+3. MANY_TO_ONE: Relación muchos a uno (ej: Pedidos pertenecen a un Usuario)
+4. MANY_TO_MANY: Relación muchos a muchos (ej: Estudiantes tienen muchos Cursos, Cursos tienen muchos Estudiantes)
+5. INHERITANCE: Herencia (ej: Empleado extiende de Persona, usa cuando una clase "es un tipo de" otra)
+6. COMPOSITION: Composición (ej: Casa contiene Habitaciones, usa cuando una clase "contiene" otra y la parte no puede existir sin el todo)
+7. AGGREGATION: Agregación (ej: Universidad tiene Estudiantes, usa cuando una clase "tiene" otra pero la parte puede existir independientemente)
+
+CUANDO USAR CADA TIPO:
+- INHERITANCE: Cuando una clase "es un tipo de" otra (relación is-a)
+- COMPOSITION: Cuando una clase "contiene" otra y la parte no puede existir sin el todo (relación parte-todo fuerte)
+- AGGREGATION: Cuando una clase "tiene" otra pero la parte puede existir independientemente (relación parte-todo débil)
+- MANY_TO_MANY: Cuando múltiples instancias de una clase se relacionan con múltiples instancias de otra
 
 FORMATO DE RESPUESTA:
 Debes responder ÚNICAMENTE con un objeto JSON válido que siga exactamente esta estructura:
@@ -71,14 +86,25 @@ Debes responder ÚNICAMENTE con un objeto JSON válido que siga exactamente esta
       "id": "relacion_1",
       "source": "ClaseOrigen",
       "target": "ClaseDestino",
-      "type": "ONE_TO_ONE|ONE_TO_MANY|MANY_TO_ONE|MANY_TO_MANY",
-      "sourceLabel": "etiqueta origen",
-      "targetLabel": "etiqueta destino",
-      "mappedBy": "campoMapeado",
-      "joinColumn": "columna_union"
+      "type": "ONE_TO_ONE|ONE_TO_MANY|MANY_TO_ONE|MANY_TO_MANY|INHERITANCE|COMPOSITION|AGGREGATION",
+      "sourceCardinality": "1|*|0..1|1..*",
+      "targetCardinality": "1|*|0..1|1..*",
+      "sourceLabel": "etiqueta origen (opcional)",
+      "targetLabel": "etiqueta destino (opcional)",
+      "mappedBy": "campoMapeado (opcional, para JPA)",
+      "joinColumn": "columna_union (opcional, para JPA)",
+      "label": "Etiqueta descriptiva (opcional)"
     }
   ]
 }
+
+CAMPOS OBLIGATORIOS PARA RELACIONES:
+- id: Identificador único de la relación
+- source: Nombre de la clase origen
+- target: Nombre de la clase destino
+- type: Tipo de relación (debe ser uno de los 7 tipos soportados)
+- sourceCardinality: Cardinalidad en el origen (ej: "1", "*", "0..1", "1..*")
+- targetCardinality: Cardinalidad en el destino (ej: "1", "*", "0..1", "1..*")
 
 NO incluyas texto adicional, explicaciones o comentarios. Solo el JSON válido.`;
 
@@ -92,8 +118,22 @@ REQUISITOS CLAVE:
 - Si la clase/relación ya existe, MODIFICA en lugar de crear duplicados.
 - Mantén convenciones: PascalCase para clases, camelCase para atributos/métodos.
 - Campos comunes: agregar id (Long, isId: true) si corresponde; respetar tipos Java (String, Long, Integer, Boolean, LocalDateTime, BigDecimal).
-- Para relaciones, respeta ONE_TO_ONE, ONE_TO_MANY, MANY_TO_ONE, MANY_TO_MANY.
 - Todas las salidas deben ser ACCIONES discretas.
+
+TIPOS DE RELACIONES UML SOPORTADAS:
+1. ONE_TO_ONE: Relación uno a uno (ej: Usuario tiene un Perfil)
+2. ONE_TO_MANY: Relación uno a muchos (ej: Usuario tiene muchos Pedidos)
+3. MANY_TO_ONE: Relación muchos a uno (ej: Pedidos pertenecen a un Usuario)
+4. MANY_TO_MANY: Relación muchos a muchos (ej: Estudiantes tienen muchos Cursos, Cursos tienen muchos Estudiantes)
+5. INHERITANCE: Herencia (ej: Empleado extiende de Persona, usa "extiende", "hereda", "es un")
+6. COMPOSITION: Composición (ej: Casa contiene Habitaciones, usa "contiene", "compone", "parte de")
+7. AGGREGATION: Agregación (ej: Universidad tiene Estudiantes, usa "tiene", "agrega", "incluye")
+
+CUANDO USAR CADA TIPO:
+- INHERITANCE: Cuando una clase "es un tipo de" otra (relación is-a)
+- COMPOSITION: Cuando una clase "contiene" otra y la parte no puede existir sin el todo (relación parte-todo fuerte)
+- AGGREGATION: Cuando una clase "tiene" otra pero la parte puede existir independientemente (relación parte-todo débil)
+- MANY_TO_MANY: Cuando múltiples instancias de una clase se relacionan con múltiples instancias de otra
 
 FORMATO DE RESPUESTA (JSON válido):
 {
@@ -111,18 +151,43 @@ FORMATO DE RESPUESTA (JSON válido):
         "methodName": "nombreMetodo",
         "newMethodName": "nuevoNombreMetodo"
       },
-      "payload": { "objeto": "completo con los campos actualizados o a crear" },
+      "payload": {
+        "type": "ONE_TO_ONE|ONE_TO_MANY|MANY_TO_ONE|MANY_TO_MANY|INHERITANCE|COMPOSITION|AGGREGATION",
+        "source": "ClaseOrigen",
+        "target": "ClaseDestino",
+        "sourceCardinality": "1|*|0..1|1..*",
+        "targetCardinality": "1|*|0..1|1..*",
+        "mappedBy": "nombreCampo (opcional, para JPA)",
+        "joinColumn": "nombre_columna (opcional, para JPA)",
+        "label": "Etiqueta descriptiva (opcional)"
+      },
       "reason": "Explicación breve de por qué se toma esta acción"
     }
   ]
 }
+
+CAMPOS OBLIGATORIOS PARA CREATE_RELATION:
+- type: Tipo de relación (debe ser uno de los 7 tipos soportados)
+- source: Nombre de la clase origen
+- target: Nombre de la clase destino
+- sourceCardinality: Cardinalidad en el origen (ej: "1", "*", "0..1", "1..*")
+- targetCardinality: Cardinalidad en el destino (ej: "1", "*", "0..1", "1..*")
+
+CAMPOS OPCIONALES PARA CREATE_RELATION:
+- mappedBy: Campo que mapea la relación (para JPA)
+- joinColumn: Nombre de columna de unión (para JPA)
+- label: Etiqueta descriptiva de la relación
 
 INSTRUCCIONES DE DECISIÓN:
 - Si el usuario dice "añade atributo X a la clase Y" y la clase Y existe, devuelve ADD_ATTRIBUTE.
 - Si el atributo existe, usa UPDATE_ATTRIBUTE.
 - Si se pide renombrar, usa RENAME_CLASS/UPDATE_ATTRIBUTE con newAttributeName/UPDATE_METHOD con newMethodName.
 - Si se pide eliminar, usa la acción DELETE_* correspondiente.
-- Si se pide una nueva relación entre clases existentes, usa CREATE_RELATION.
+- Si se pide una nueva relación entre clases existentes, usa CREATE_RELATION con el tipo apropiado.
+- Si el usuario dice "extiende", "hereda", "es un" → usa INHERITANCE.
+- Si el usuario dice "contiene", "compone", "parte de" (relación fuerte) → usa COMPOSITION.
+- Si el usuario dice "tiene", "agrega", "incluye" (relación débil) → usa AGGREGATION.
+- Si el usuario dice "muchos a muchos" o describe relación bidireccional múltiple → usa MANY_TO_MANY.
 - Si las clases no existen y es necesario, crea primero con CREATE_CLASS y luego la relación.
 
 NO incluyas texto adicional ni comentarios fuera del JSON.`;
