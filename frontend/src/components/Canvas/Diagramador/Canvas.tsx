@@ -312,27 +312,40 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
                 height: 120
               };
 
+              // marcar metadata para indicar que esta clase fue generada como join
+              // de modo que CanvasStage la renderice como MANY_TO_MANY visual
+              (joinClass as any).metadata = {
+                generatedJoinFor: [sourceId, targetId],
+                hiddenInCanvas: false
+              };
+
               if (typeof addClass === 'function') addClass(joinClass);
               else console.warn('addClass no disponible en useDiagramStore; implementa addClass.');
 
               // Crear dos relaciones OneToMany hacia la clase intermedia
+              // Use the cardinalities selected in the MANY_TO_MANY modal so
+              // the visual main line keeps the intended labels (e.g. "1..*").
               const rel1: Omit<UMLRelation, 'id'> = {
                 source: sourceId,
                 target: joinId,
                 type: 'ONE_TO_MANY',
-                sourceCardinality: '1',
-                targetCardinality: '0..*',
-                label: undefined,
+                // sourceCardinality on rel1 corresponds to the original relation's source side
+                sourceCardinality: (relationData && relationData.sourceCardinality) || '1',
+                // target (join) typically many
+                targetCardinality: (relationData && relationData.sourceCardinality && relationData.sourceCardinality.includes('*')) ? '0..*' : '1',
+                label:  undefined,
                 mappedBy: undefined,
                 joinColumn: undefined
               };
+
               const rel2: Omit<UMLRelation, 'id'> = {
                 source: targetId,
                 target: joinId,
                 type: 'ONE_TO_MANY',
-                sourceCardinality: '1',
-                targetCardinality: '0..*',
-                label: undefined,
+                // sourceCardinality on rel2 corresponds to the original relation's target side
+                sourceCardinality: (relationData && relationData.targetCardinality) || '1',
+                targetCardinality: (relationData && relationData.targetCardinality && relationData.targetCardinality.includes('*')) ? '0..*' : '1',
+                label: (relationData as any).labelTarget || undefined,
                 mappedBy: undefined,
                 joinColumn: undefined
               };
@@ -381,6 +394,7 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
           targetClassId={relationToEdit.target}
           sourceClassName={editSourceName}
           targetClassName={editTargetName}
+          initialRelation={relationToEdit}
         />
       )}
     </div>

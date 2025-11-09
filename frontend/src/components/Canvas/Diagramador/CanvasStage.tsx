@@ -108,35 +108,82 @@ export const CanvasStage: React.FC<CanvasStageProps> = memo(({
       <Layer>
         {/* Grid background */}
         <Group>
-          {Array.from({ length: Math.ceil(width / 20) }, (_, i) => (
-            <Line
-              key={`v-${i}`}
-              points={[i * 20, 0, i * 20, height]}
-              stroke="#e0e0e0"
-              strokeWidth={0.5}
-              opacity={0.3}
-            />
-          ))}
-          {Array.from({ length: Math.ceil(height / 20) }, (_, i) => (
-            <Line
-              key={`h-${i}`}
-              points={[0, i * 20, width, i * 20]}
-              stroke="#e0e0e0"
-              strokeWidth={0.5}
-              opacity={0.3}
-            />
-          ))}
+          {/*
+            Grid dinámico: en lugar de dibujar solo en el área visible (width/height),
+            expandimos la rejilla para cubrir el área del diagrama (clases) y el viewport,
+            así al hacer pan/zoom la cuadrícula sigue mostrando por completo.
+          */}
+          {(() => {
+            const STEP = 20;
+            const PAD = 600; // padding extra alrededor de las clases
+
+            // calcular bounds del diagrama a partir de las clases
+            let minX = 0, minY = 0, maxX = width, maxY = height;
+            if (diagram && Array.isArray(diagram.classes) && diagram.classes.length > 0) {
+              minX = Math.min(...diagram.classes.map(c => (c.position?.x ?? 0)));
+              minY = Math.min(...diagram.classes.map(c => (c.position?.y ?? 0)));
+              maxX = Math.max(...diagram.classes.map(c => ((c.position?.x ?? 0) + (c.width ?? 0))));
+              maxY = Math.max(...diagram.classes.map(c => ((c.position?.y ?? 0) + (c.height ?? 0))));
+            }
+
+            const left = Math.min(0, minX - PAD);
+            const top = Math.min(0, minY - PAD);
+            const right = Math.max(width, maxX + PAD);
+            const bottom = Math.max(height, maxY + PAD);
+
+            const countX = Math.min(2000, Math.ceil((right - left) / STEP));
+            const countY = Math.min(2000, Math.ceil((bottom - top) / STEP));
+
+            const vLines = Array.from({ length: countX }, (_, i) => {
+              const x = left + i * STEP;
+              return (
+                <Line
+                  key={`v-${i}`}
+                  points={[x, top, x, bottom]}
+                  stroke="#e0e0e0"
+                  strokeWidth={0.5}
+                  opacity={0.25}
+                />
+              );
+            });
+
+            const hLines = Array.from({ length: countY }, (_, i) => {
+              const y = top + i * STEP;
+              return (
+                <Line
+                  key={`h-${i}`}
+                  points={[left, y, right, y]}
+                  stroke="#e0e0e0"
+                  strokeWidth={0.5}
+                  opacity={0.25}
+                />
+              );
+            });
+
+            return [...vLines, ...hLines];
+          })()}
         </Group>
 
         {/* Connection lines */}
         {(() => {
           if (!diagram) return null;
 
-          // Agrupar relaciones por target (posible clase "join")
-          // Solo consideramos ONE_TO_MANY para agrupar como MANY_TO_MANY visual, evitando confundir INHERITANCE/otros
+          // Agrupar relaciones por target (posible clase "join").
+          // Anteriormente agrupábamos cualquier par de ONE_TO_MANY que apuntaran
+          // a la misma clase y los representábamos como MANY_TO_MANY visual.
+          // Eso convertía entidades normales en joins visuales cuando dos clases
+          // simplemente apuntaban a la misma entidad (por ejemplo Cliente -> Venta
+          // y Empleado -> Venta). Para evitar ese comportamiento, solo consideramos
+          // grupo de join cuando la clase target existe y contiene metadata indicando
+          // que fue generada como join (metadata.generatedJoinFor).
           const relationsByTarget = new Map<string, typeof diagram.relations>();
           diagram.relations.forEach(r => {
             if (r.type !== 'ONE_TO_MANY') return;
+            const targetClass = diagram.classes.find(c => c.id === r.target);
+            // solo agrupar si la clase target es explícitamente una 'join' generada
+            if (!targetClass) return;
+            const meta = (targetClass as any).metadata;
+            if (!meta || !Array.isArray(meta.generatedJoinFor)) return;
             const arr = relationsByTarget.get(r.target) || [];
             arr.push(r);
             relationsByTarget.set(r.target, arr);
@@ -223,6 +270,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = memo(({
                 // pasar cardinalidades desde las relaciones originales (opcional)
                 cardinalityA={g.relA.sourceCardinality}
                 cardinalityB={g.relB.sourceCardinality}
+                
                 onContextMenu={(clientX, clientY) => {
                   // abrir menú contextual para el join (si se desea)
                   if (typeof onRelationContextMenu === 'function') onRelationContextMenu(clientX, clientY, g.relA.id);

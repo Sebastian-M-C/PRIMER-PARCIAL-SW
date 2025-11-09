@@ -14,12 +14,15 @@ interface ManyToManyVisualProps {
   joinClassBox: Box;
   cardinalityA?: string;
   cardinalityB?: string;
+  
   onContextMenu?: (clientX: number, clientY: number) => void;
 }
 
 export const ManyToManyVisual: React.FC<ManyToManyVisualProps> = ({
   sourceA, sourceB, joinClassBox, cardinalityA, cardinalityB, onContextMenu
 }) => {
+  // extract optional side labels
+  const { } = {} as any;
   // calcular puntos centrales de las cajas
   const center = (b: Box) => ({ x: b.x + b.width / 2, y: b.y + b.height / 2 });
   const a = center(sourceA);
@@ -90,6 +93,7 @@ export const ManyToManyVisual: React.FC<ManyToManyVisualProps> = ({
           <Text text={cardinalityA} x={cardPosA.x - 12} y={cardPosA.y - 8} width={24} align="center" fontSize={12} fill="#111" listening={false} />
         </Group>
       )}
+      
 
       {cardinalityB && (
         <Group>
@@ -97,6 +101,7 @@ export const ManyToManyVisual: React.FC<ManyToManyVisualProps> = ({
           <Text text={cardinalityB} x={cardPosB.x - 12} y={cardPosB.y - 8} width={24} align="center" fontSize={12} fill="#111" listening={false} />
         </Group>
       )}
+    
     </Group>
   );
 };

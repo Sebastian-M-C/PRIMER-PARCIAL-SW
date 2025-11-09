@@ -38,6 +38,8 @@ interface RelationModalProps {
   targetClassId?: string;
   sourceClassName?: string;
   targetClassName?: string;
+  // Optional initial relation to prefill the modal when editing
+  initialRelation?: Omit<UMLRelation, 'id'> | UMLRelation;
 }
 
 export const RelationModal: React.FC<RelationModalProps> = ({
@@ -47,22 +49,40 @@ export const RelationModal: React.FC<RelationModalProps> = ({
   sourceClassId,
   targetClassId,
   sourceClassName = '',
-  targetClassName = ''
+  targetClassName = '',
+  initialRelation
 }) => {
   const [type, setType] = useState<string>('ONE_TO_ONE');
   const [sourceCardinality, setSourceCardinality] = useState<string>('1');
   const [targetCardinality, setTargetCardinality] = useState<string>('1');
   const [label, setLabel] = useState<string>('');
+
   const [mappedBy, setMappedBy] = useState<string>('');
   const [joinColumn, setJoinColumn] = useState<string>('');
 
   const [joinName, setJoinName] = useState<string>('');
-  const [joinAttributes, setJoinAttributes] = useState<JoinAttribute[]>(
-    [{ name: 'id', type: 'int' }]
-  );
+  // Start with no default attribute so the modal doesn't force an 'id:int' field
+  const [joinAttributes, setJoinAttributes] = useState<JoinAttribute[]>([]);
+
+  // Opciones de tipo reusables (compatibles con ClassEditor)
+  const typeOptions = [
+    '',
+    'int',
+    'String',
+    'Long',
+    'Integer',
+    'Float',
+    'Double',
+    'Boolean',
+    'LocalDate',
+    'LocalDateTime',
+    'Date',
+    'BigDecimal'
+  ];
 
   useEffect(() => {
     if (!isOpen) {
+      // reset
       setType('ONE_TO_ONE');
       setSourceCardinality('1');
       setTargetCardinality('1');
@@ -70,13 +90,86 @@ export const RelationModal: React.FC<RelationModalProps> = ({
       setMappedBy('');
       setJoinColumn('');
       setJoinName('');
-      setJoinAttributes([{ name: 'id', type: 'int' }]);
+      setJoinAttributes([]);
+      return;
     }
-  }, [isOpen]);
+
+    // If opened for editing, prefill fields from initialRelation
+    if (initialRelation) {
+      setType(initialRelation.type || 'ONE_TO_ONE');
+      setSourceCardinality(initialRelation.sourceCardinality || '1');
+      setTargetCardinality(initialRelation.targetCardinality || '1');
+      setLabel(initialRelation.label || '');
+      setMappedBy(initialRelation.mappedBy || '');
+      setJoinColumn(initialRelation.joinColumn || '');
+      
+      // joinClass info (name/attrs) aren't part of relation; leave join fields empty
+      setJoinName('');
+      setJoinAttributes([]);
+      return;
+    }
+
+    // otherwise fresh open -> ensure defaults
+    setType('ONE_TO_ONE');
+    setSourceCardinality('1');
+    setTargetCardinality('1');
+    setLabel('');
+ 
+    setMappedBy('');
+    setJoinColumn('');
+    setJoinName('');
+    setJoinAttributes([]);
+  }, [isOpen, initialRelation]);
+
+  // Cuando el tipo de relación cambia, establecer cardinalidades por defecto
+  // apropiadas para ese tipo. Esto evita que el usuario tenga que corregir
+  // manualmente las etiquetas después de crear la relación.
+  useEffect(() => {
+    // Only apply automatic defaults when creating a new relation (no initialRelation)
+    if (initialRelation) return;
+
+    switch (type) {
+      case 'ONE_TO_ONE':
+        setSourceCardinality('1');
+        setTargetCardinality('1');
+        break;
+      case 'ONE_TO_MANY':
+        // origen 1, destino muchos
+        setSourceCardinality('1');
+        setTargetCardinality('1..*');
+        break;
+      case 'MANY_TO_ONE':
+        // origen muchos, destino 1
+        setSourceCardinality('1..*');
+        setTargetCardinality('1');
+        break;
+      case 'MANY_TO_MANY':
+        setSourceCardinality('1..*');
+        setTargetCardinality('1..*');
+        break;
+      case 'INHERITANCE':
+        setSourceCardinality('1');
+        setTargetCardinality('1');
+        break;
+      case 'COMPOSITION':
+        setSourceCardinality('1');
+        setTargetCardinality('1..*');
+        break;
+      case 'AGGREGATION':
+        setSourceCardinality('1');
+        setTargetCardinality('0..*');
+        break;
+      default:
+        break;
+    }
+  }, [type]);
+
+ 
+  
 
   if (!isOpen) return null;
 
-  const handleAddAttribute = () => setJoinAttributes(prev => [...prev, { name: '', type: 'string' }]);
+  const handleAddAttribute = () => setJoinAttributes(prev => [...prev, { name: '', type: '' }]);
   const handleRemoveAttribute = (index: number) => setJoinAttributes(prev => prev.filter((_, i) => i !== index));
   const handleAttributeChange = (index: number, key: 'name' | 'type', value: string) =>
     setJoinAttributes(prev => prev.map((a, i) => i === index ? { ...a, [key]: value } : a));
@@ -99,6 +192,7 @@ export const RelationModal: React.FC<RelationModalProps> = ({
         name: joinName || `${sourceClassName}_${targetClassName}_DETALLE`,
         attributes: joinAttributes.filter(a => a.name.trim() !== '')
       };
+     
       onConfirm(relationData, joinConfig);
     } else {
       onConfirm(relationData);
@@ -175,17 +269,24 @@ export const RelationModal: React.FC<RelationModalProps> = ({
             </select>
           </div>
 
-          <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+            <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
             <div style={{ flex: 1 }}>
               <label style={labelStyle}>Cardinalidad origen ({sourceClassName || 'origen'})</label>
+              {/** If MANY_TO_MANY only allow 1..* or 0..* */}
               <select value={sourceCardinality} onChange={e => setSourceCardinality(e.target.value)} style={inputStyle}>
-                {CARDINALITY_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                {(type === 'MANY_TO_MANY' ? [
+                  { value: '1..*', label: '1..*' },
+                  { value: '0..*', label: '0..*' }
+                ] : CARDINALITY_OPTIONS).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
             <div style={{ flex: 1 }}>
               <label style={labelStyle}>Cardinalidad destino ({targetClassName || 'destino'})</label>
               <select value={targetCardinality} onChange={e => setTargetCardinality(e.target.value)} style={inputStyle}>
-                {CARDINALITY_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                {(type === 'MANY_TO_MANY' ? [
+                  { value: '1..*', label: '1..*' },
+                  { value: '0..*', label: '0..*' }
+                ] : CARDINALITY_OPTIONS).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
           </div>
@@ -211,6 +312,7 @@ export const RelationModal: React.FC<RelationModalProps> = ({
 
               <div>
                 <label style={labelStyle}>Atributos</label>
+              
                 {joinAttributes.map((attr, idx) => (
                   <div key={idx} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
                     <input
@@ -219,12 +321,17 @@ export const RelationModal: React.FC<RelationModalProps> = ({
                       placeholder="nombre"
                       style={{ ...inputStyle, flex: 1 }}
                     />
-                    <input
+                    <select
                       value={attr.type}
                       onChange={e => handleAttributeChange(idx, 'type', e.target.value)}
-                      placeholder="tipo"
                       style={smallInputStyle}
-                    />
+                    >
+                      {typeOptions.map(t => (
+                        <option key={t} value={t}>
+                          {t === '' ? 'Seleccionar tipo' : t}
+                        </option>
+                      ))}
+                    </select>
                     <button
                       type="button"
                       onClick={() => handleRemoveAttribute(idx)}
