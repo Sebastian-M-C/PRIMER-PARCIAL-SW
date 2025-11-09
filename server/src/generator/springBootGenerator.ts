@@ -55,14 +55,30 @@ export async function generateSpringBootProject(umlData: UMLDiagramJSON): Promis
     // Create ZIP file
     const zipBuffer = await createZipFile(projectDir, projectName);
 
-    // Clean up temporary directory
-    await fs.promises.rm(tempDir, { recursive: true, force: true });
+  // Clean up temporary directory (with retries for Windows EPERM/EBUSY)
+  await removeDirWithRetry(tempDir);
 
     return zipBuffer;
   } catch (error) {
     // Clean up on error
-    await fs.promises.rm(tempDir, { recursive: true, force: true });
+    await removeDirWithRetry(tempDir);
     throw error;
+  }
+}
+
+async function removeDirWithRetry(dir: string, retries = 5, delayMs = 100): Promise<void> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      await fs.promises.rm(dir, { recursive: true, force: true });
+      return;
+    } catch (err: any) {
+      const code = err?.code;
+      if (attempt < retries && (code === 'EPERM' || code === 'EBUSY' || code === 'ENOTEMPTY')) {
+        await new Promise(res => setTimeout(res, delayMs));
+        continue;
+      }
+      throw err;
+    }
   }
 }
 
@@ -375,11 +391,21 @@ async function generateEntities(projectDir: string, basePackage: string, classes
  * - cls: objeto con nombre, atributos y relaciones.
  * - Retorna: string con el código Java de la entidad.
  */
+function isIdLikeAttribute(attr: any): boolean {
+  const name = (attr?.name || '').trim();
+  if (!name) return false;
+  if (attr?.isId) return true;
+  const lower = name.toLowerCase();
+  if (lower === 'id') return true;
+  // idProductos, id_user, id1
+  return /^id([A-Z_0-9].*)?$/.test(name);
+}
+
 function generateEntityClass(basePackage: string, cls: any, classNameOverride?: string, inheritanceTargets?: Set<string>): string {
   const className = classNameOverride || toJavaClassName(cls.name);
   // Detectar atributo id aunque no tenga la marca isId;
   // esto evita duplicar campo cuando el usuario define 'id' pero olvida poner isId.
-  const idAttribute = cls.attributes?.find((attr: any) => attr.isId || attr.name?.toLowerCase() === 'id');
+  const idAttribute = cls.attributes?.find((attr: any) => isIdLikeAttribute(attr));
   const hasId = !!idAttribute;
   // Detectar relación(es) de herencia (INHERITANCE) para extender la clase padre
   const inheritanceRels = (cls.relations || []).filter((r: any) => r.type === 'INHERITANCE');
@@ -442,7 +468,7 @@ public class ${className}${parentClass ? ' extends ' + parentClass : ''} {`;
     content += `\n\n    `;
 
     // Add JPA annotations
-    if (attr.isId || attr.name?.toLowerCase() === 'id') {
+  if (isIdLikeAttribute(attr)) {
       // Si el atributo ya existe y representa el id, agregar anotaciones una sola vez.
       content += `@Id\n    @GeneratedValue(strategy = GenerationType.IDENTITY)\n    `;
     }
@@ -451,7 +477,7 @@ public class ${className}${parentClass ? ' extends ' + parentClass : ''} {`;
       content += `@Column(unique = true)\n    `;
     }
 
-    if (!attr.nullable && !attr.isId) {
+    if (!attr.nullable && !isIdLikeAttribute(attr)) {
       content += `@NotNull\n    `;
     }
 
@@ -662,7 +688,7 @@ function generateRequestDTO(basePackage: string, cls: any): string {
   }
 
   // Determine DTO fields (for Request we skip ID)
-  const dtoFields = (cls.attributes || []).filter((a: any) => !a.isId);
+  const dtoFields = (cls.attributes || []).filter((a: any) => !isIdLikeAttribute(a));
   const hasFields = dtoFields.length > 0;
 
   // Add lombok annotations conditionally to avoid duplicate constructors when no fields exist
@@ -1027,7 +1053,7 @@ function generateBuilderFieldsForEntity(cls: any): string {
   let fields = '';
 
   for (const attr of cls.attributes || []) {
-    if (attr.isId) continue; // Skip ID for entity creation
+    if (isIdLikeAttribute(attr)) continue; // Skip ID for entity creation
 
     fields += `\n                .${attr.name}(request.get${attr.name.charAt(0).toUpperCase() + attr.name.slice(1)}())`;
   }
@@ -1059,7 +1085,7 @@ function generateUpdateFieldsForEntity(cls: any): string {
   let fields = '';
 
   for (const attr of cls.attributes || []) {
-    if (attr.isId) continue;
+    if (isIdLikeAttribute(attr)) continue;
 
     fields += `\n        if (request.get${attr.name.charAt(0).toUpperCase() + attr.name.slice(1)}() != null) {
             entity.set${attr.name.charAt(0).toUpperCase() + attr.name.slice(1)}(request.get${attr.name.charAt(0).toUpperCase() + attr.name.slice(1)}());

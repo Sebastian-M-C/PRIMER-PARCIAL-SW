@@ -15,40 +15,41 @@ function toSafeName(name: string): string {
   return toJavaClassName(name).toLowerCase();
 }
 
+function isIdLikeAttribute(attr: any): boolean {
+  const name = (attr?.name || '').trim();
+  if (!name) return false;
+  if (attr?.isId) return true;
+  const lower = name.toLowerCase();
+  if (lower === 'id') return true;
+  return /^id([A-Z_0-9].*)?$/.test(name);
+}
+
+function normalizeType(t: string): string {
+  return (t || '').trim().toLowerCase();
+}
+
 function generateSampleJson(cls: any, includeId: boolean = true): string {
   const sample: any = {};
 
   for (const attr of cls.attributes || []) {
-    if (attr.isId && !includeId) continue;
-
-    switch (attr.type) {
-      case 'String':
-        sample[attr.name] = `Sample ${attr.name}`;
-        break;
-      case 'Long':
-      case 'Integer':
-        sample[attr.name] = 1;
-        break;
-      case 'Boolean':
-        sample[attr.name] = true;
-        break;
-      case 'LocalDateTime':
-        sample[attr.name] = '2023-12-01T10:00:00';
-        break;
-      case 'BigDecimal':
-        sample[attr.name] = 99.99;
-        break;
-      default:
-        sample[attr.name] = `Sample ${attr.name}`;
-    }
+    if (!includeId && isIdLikeAttribute(attr)) continue;
+    const norm = normalizeType(attr.type);
+    if (['long','integer','int','number'].includes(norm)) { sample[attr.name] = 1; continue; }
+    if (['float','double','decimal','bigdecimal','money'].includes(norm)) { sample[attr.name] = 99.99; continue; }
+    if (['boolean','bool'].includes(norm)) { sample[attr.name] = true; continue; }
+    if (['date'].includes(norm)) { sample[attr.name] = '2025-11-09'; continue; }
+    if (['datetime','timestamp','localdatetime'].includes(norm)) { sample[attr.name] = '2025-11-09T12:00:00Z'; continue; }
+    if (['time','localtime'].includes(norm)) { sample[attr.name] = '12:00:00'; continue; }
+    // default string
+    sample[attr.name] = `Sample ${attr.name}`;
   }
 
   return JSON.stringify(sample, null, 2);
 }
 
 export async function generatePostmanCollection(projectDir: string, projectName: string, classes: any[]): Promise<void> {
+  // Base fija solicitada por el usuario
   const defaultBase = 'http://localhost:8080';
-  const baseUrl = `${defaultBase}/api`;
 
   const collection: any = {
     info: {
@@ -81,7 +82,8 @@ export async function generatePostmanCollection(projectDir: string, projectName:
               raw: generateSampleJson(cls, false)
             },
             url: {
-              raw: `${baseUrl}/${className}s`
+              raw: `${defaultBase}/api/${className}s`,
+              path: ['api', `${className}s`]
             }
           }
         },
@@ -90,7 +92,8 @@ export async function generatePostmanCollection(projectDir: string, projectName:
           request: {
             method: 'GET',
             url: {
-              raw: `${baseUrl}/${className}s`
+              raw: `${defaultBase}/api/${className}s`,
+              path: ['api', `${className}s`]
             }
           }
         },
@@ -99,7 +102,8 @@ export async function generatePostmanCollection(projectDir: string, projectName:
           request: {
             method: 'GET',
             url: {
-              raw: `${baseUrl}/${className}s/1`
+              raw: `${defaultBase}/api/${className}s/1`,
+              path: ['api', `${className}s`, '1']
             }
           }
         },
@@ -115,7 +119,8 @@ export async function generatePostmanCollection(projectDir: string, projectName:
               raw: generateSampleJson(cls, false)
             },
             url: {
-              raw: `${baseUrl}/${className}s/1`
+              raw: `${defaultBase}/api/${className}s/1`,
+              path: ['api', `${className}s`, '1']
             }
           }
         },
@@ -124,7 +129,8 @@ export async function generatePostmanCollection(projectDir: string, projectName:
           request: {
             method: 'DELETE',
             url: {
-              raw: `${baseUrl}/${className}s/1`
+              raw: `${defaultBase}/api/${className}s/1`,
+              path: ['api', `${className}s`, '1']
             }
           }
         }
@@ -149,7 +155,7 @@ export async function generatePostmanCollection(projectDir: string, projectName:
         name: 'Health (variable baseUrl)',
         request: {
           method: 'GET',
-          url: { raw: `{{baseUrl}}/health` }
+          url: { raw: `{{baseUrl}}/health`, path: ['health'] }
         }
       }
     ]

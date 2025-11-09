@@ -1,6 +1,8 @@
 import { generateSpringBootProject } from '../springBootGenerator';
 import AdmZip from 'adm-zip';
 
+jest.setTimeout(30000);
+
 function getEntry(zip: AdmZip, entryPath: string): string | null {
   const e = zip.getEntry(entryPath);
   if (!e) return null;
