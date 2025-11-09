@@ -300,7 +300,7 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
             fontSize: '12px',
             opacity: isGenerating ? 0.6 : 1
           }}
-          title="Modificar diagrama usando IA (instrucción en texto)"
+          title="Modificar diagrama usando IA. Ejemplos:&#10;• 'Añade email a Usuario' → agrega email:String&#10;• 'Añade edad a Persona' → agrega edad:Long&#10;• 'Añade precio a Producto' → agrega precio:BigDecimal&#10;• 'Cambia email a correoElectronico en Usuario' → renombra atributo&#10;• 'Elimina telefono de Contacto' → elimina atributo&#10;• 'Crea relación ONE_TO_MANY entre Pedido y Producto' → crea relación&#10;• 'Haz que Empleado herede de Persona' → crea herencia"
         >
           <Edit3 size={14} />
           {isGenerating ? 'Cargando...' : 'IA Modificar'}

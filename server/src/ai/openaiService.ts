@@ -178,10 +178,33 @@ CAMPOS OPCIONALES PARA CREATE_RELATION:
 - joinColumn: Nombre de columna de unión (para JPA)
 - label: Etiqueta descriptiva de la relación
 
+DETECCIÓN Y TIPADO DE ATRIBUTOS:
+- **IMPORTANTE**: Siempre detecta e infiere el tipo de dato correcto para los atributos basándote en el nombre y contexto.
+- Tipos comunes de Java: String, Long, Integer, Double, BigDecimal, Boolean, LocalDateTime, Date.
+- Si el usuario dice "añade email" → infiere tipo String (ej: { name: "email", type: "String" }).
+- Si el usuario dice "añade edad" o "añade cantidad" → infiere tipo Long o Integer (ej: { name: "edad", type: "Long" }).
+- Si el usuario dice "añade precio" o "añade total" → infiere tipo BigDecimal o Double (ej: { name: "precio", type: "BigDecimal" }).
+- Si el usuario dice "añade activo" o "añade esActivo" → infiere tipo Boolean (ej: { name: "activo", type: "Boolean" }).
+- Si el usuario dice "añade fecha" o "añade createdAt" → infiere tipo LocalDateTime (ej: { name: "fechaCreacion", type: "LocalDateTime" }).
+- Si el usuario especifica el tipo explícitamente (ej: "añade email:String"), usa ese tipo.
+- Si el atributo es "id" o termina en "Id", usa tipo Long con isId: true.
+- Para atributos que referencian otras clases, usa el nombre de la clase como tipo (ej: { name: "usuario", type: "Usuario" }).
+
+FORMATO DE ATRIBUTOS EN PAYLOAD:
+Para ADD_ATTRIBUTE y UPDATE_ATTRIBUTE, el payload debe ser un objeto con esta estructura:
+{
+  "name": "nombreAtributo",
+  "type": "String|Long|Integer|Double|BigDecimal|Boolean|LocalDateTime|Date|NombreClase",
+  "nullable": false,
+  "unique": false,
+  "isId": false
+}
+
 INSTRUCCIONES DE DECISIÓN:
-- Si el usuario dice "añade atributo X a la clase Y" y la clase Y existe, devuelve ADD_ATTRIBUTE.
-- Si el atributo existe, usa UPDATE_ATTRIBUTE.
-- Si se pide renombrar, usa RENAME_CLASS/UPDATE_ATTRIBUTE con newAttributeName/UPDATE_METHOD con newMethodName.
+- Si el usuario dice "añade atributo X a la clase Y" y la clase Y existe, devuelve ADD_ATTRIBUTE con el tipo inferido.
+- Si el atributo existe, usa UPDATE_ATTRIBUTE para actualizarlo (puede cambiar nombre, tipo, o ambos).
+- Si se pide renombrar atributo, usa UPDATE_ATTRIBUTE con newAttributeName en target y el nuevo nombre en payload.name.
+- Si se pide cambiar el tipo de un atributo, usa UPDATE_ATTRIBUTE con el nuevo tipo en payload.type.
 - Si se pide eliminar, usa la acción DELETE_* correspondiente.
 - Si se pide una nueva relación entre clases existentes, usa CREATE_RELATION con el tipo apropiado.
 - Si el usuario dice "extiende", "hereda", "es un" → usa INHERITANCE.
@@ -242,11 +265,14 @@ export interface UMLDiagramResponse {
     id: string;
     source: string;
     target: string;
-    type: 'ONE_TO_ONE' | 'ONE_TO_MANY' | 'MANY_TO_ONE' | 'MANY_TO_MANY';
+    type: 'ONE_TO_ONE' | 'ONE_TO_MANY' | 'MANY_TO_ONE' | 'MANY_TO_MANY' | 'INHERITANCE' | 'COMPOSITION' | 'AGGREGATION';
+    sourceCardinality?: string;
+    targetCardinality?: string;
     sourceLabel?: string;
     targetLabel?: string;
     mappedBy?: string;
     joinColumn?: string;
+    label?: string;
   }>;
 }
 

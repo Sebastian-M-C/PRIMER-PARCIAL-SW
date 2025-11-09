@@ -388,13 +388,13 @@ export function useDiagramActions() {
       const existingId = nameToIdMap.get(cls.name);
       const existingClass = existingId ? idToClassMap.get(existingId) : null;
 
-      // Si existe, preservar posición y dimensiones, actualizar atributos/métodos
+      // Si existe, preservar posición y dimensiones, actualizar solo atributos (sin métodos)
       if (existingClass) {
         const updatedClass: UMLClass = {
           ...existingClass,
           name: cls.name,
           attributes: cls.attributes || [],
-          methods: cls.methods || []
+          methods: [] // No incluir métodos/procedimientos
         };
         convertedClasses.push(updatedClass);
         usedIds.add(existingClass.id);
@@ -408,7 +408,7 @@ export function useDiagramActions() {
         id: newId,
         name: cls.name || `Class${index + 1}`,
         attributes: cls.attributes || [],
-        methods: cls.methods || [],
+        methods: [], // No incluir métodos/procedimientos
         position: cls.position || { 
           x: freePosition.x + (index * 250), 
           y: freePosition.y + (index % 2) * 200 
@@ -783,7 +783,7 @@ export function useDiagramActions() {
         id: cls.id || `ai-class-${Date.now()}-${index}`,
         name: cls.name || `Class${index + 1}`,
         attributes,
-        methods: cls.methods || [],
+        methods: [], // No incluir métodos/procedimientos
         position,
         width: cls.width || 200,
         height: cls.height || 100
@@ -888,13 +888,127 @@ export function useDiagramActions() {
       } as UMLRelation;
     });
 
+    // Separar relaciones MANY_TO_MANY del resto
+    const manyToManyRelations: Array<{ rel: UMLRelation; sourceId: string; targetId: string }> = [];
+    const otherRelations: UMLRelation[] = [];
+
+    umlRelations.forEach((rel) => {
+      if (rel.type === 'MANY_TO_MANY') {
+        // Buscar las clases por nombre
+        const sourceClass = umlClasses.find(c => c.id === rel.source || c.name === rel.source);
+        const targetClass = umlClasses.find(c => c.id === rel.target || c.name === rel.target);
+        
+        if (sourceClass && targetClass) {
+          manyToManyRelations.push({
+            rel,
+            sourceId: sourceClass.id,
+            targetId: targetClass.id
+          });
+        }
+      } else {
+        otherRelations.push(rel);
+      }
+    });
+
+    // Procesar relaciones MANY_TO_MANY: buscar clase intermedia y crear dos relaciones ONE_TO_MANY
+    const finalRelations: UMLRelation[] = [...otherRelations];
+    const finalClasses = [...umlClasses];
+
+    manyToManyRelations.forEach((m2m, index) => {
+      const sourceClass = finalClasses.find(c => c.id === m2m.sourceId);
+      const targetClass = finalClasses.find(c => c.id === m2m.targetId);
+      
+      if (!sourceClass || !targetClass) return;
+
+      // Buscar si existe una clase intermedia (join class)
+      // Puede tener metadata o un nombre que sugiera que es una clase intermedia
+      let joinClass = finalClasses.find(cls => {
+        // Verificar metadata
+        if ((cls as any).metadata?.generatedJoinFor) {
+          const joinFor = (cls as any).metadata.generatedJoinFor;
+          return (Array.isArray(joinFor) && 
+                  (joinFor.includes(m2m.sourceId) || joinFor.includes(m2m.targetId) ||
+                   joinFor.includes(sourceClass.name) || joinFor.includes(targetClass.name)));
+        }
+        // Verificar por nombre (puede ser algo como "Producto_Almacen_DETALLE")
+        const className = cls.name.toLowerCase();
+        const sourceName = sourceClass.name.toLowerCase();
+        const targetName = targetClass.name.toLowerCase();
+        return className.includes(sourceName) && className.includes(targetName);
+      });
+
+      // Si no existe, crear la clase intermedia
+      if (!joinClass) {
+        const joinClassName = `${sourceClass.name}_${targetClass.name}_DETALLE`;
+        const freePosition = findFreePosition({ classes: finalClasses });
+        
+        joinClass = {
+          id: `ai-join-class-${Date.now()}-${index}`,
+          name: joinClassName,
+          attributes: [],
+          methods: [],
+          position: freePosition,
+          width: 200,
+          height: 100
+        };
+        
+        // Agregar metadata para que CanvasStage la detecte
+        (joinClass as any).metadata = {
+          generatedJoinFor: [m2m.sourceId, m2m.targetId],
+          hiddenInCanvas: false
+        };
+        
+        finalClasses.push(joinClass);
+      } else {
+        // Asegurar que la clase intermedia tenga metadata
+        if (!(joinClass as any).metadata) {
+          (joinClass as any).metadata = {
+            generatedJoinFor: [m2m.sourceId, m2m.targetId],
+            hiddenInCanvas: false
+          };
+        }
+      }
+      
+      // Crear dos relaciones ONE_TO_MANY desde las clases principales hacia la clase intermedia
+      if (joinClass) {
+        const sourceCardinality = m2m.rel.sourceCardinality || '1';
+        const targetCardinality = m2m.rel.targetCardinality || '*';
+        
+        // Relación 1: source -> join class
+        finalRelations.push({
+          id: m2m.rel.id ? `${m2m.rel.id}_source` : `ai-relation-${Date.now()}-${index}-source`,
+          type: 'ONE_TO_MANY' as const,
+          source: m2m.sourceId,
+          target: joinClass.id,
+          sourceCardinality: sourceCardinality,
+          targetCardinality: '1..*',
+          mappedBy: m2m.rel.mappedBy || undefined,
+          joinColumn: m2m.rel.joinColumn || undefined,
+          label: m2m.rel.label || undefined
+        } as UMLRelation);
+        
+        // Relación 2: target -> join class
+        finalRelations.push({
+          id: m2m.rel.id ? `${m2m.rel.id}_target` : `ai-relation-${Date.now()}-${index}-target`,
+          type: 'ONE_TO_MANY' as const,
+          source: m2m.targetId,
+          target: joinClass.id,
+          sourceCardinality: targetCardinality,
+          targetCardinality: '1..*',
+          mappedBy: undefined,
+          joinColumn: undefined,
+          label: undefined
+        } as UMLRelation);
+      }
+    });
+
     // Crear diagrama completo
     return {
       id: diagram?.id || `diagram-${Date.now()}`,
       name: diagram?.name || 'Diagrama desde Imagen',
       package: diagram?.package || 'com.example',
-      classes: umlClasses,
-      relations: umlRelations,
+      classes: finalClasses,
+      relations: finalRelations,
       createdAt: diagram?.createdAt || new Date(),
       updatedAt: new Date()
     } as UMLDiagram;

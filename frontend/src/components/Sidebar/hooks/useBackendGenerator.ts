@@ -6,7 +6,7 @@ import { downloadFlutterZip } from '../../../services/generatorService'; // ✅ 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3001';
 
 export function useBackendGenerator() {
-  const { diagram, addClass } = useDiagramStore();
+  const { diagram, addClass, setDiagram } = useDiagramStore();
   const [isGenerating, setIsGenerating] = useState(false);
 
   /**
@@ -188,10 +188,10 @@ export function useBackendGenerator() {
   };
 
   /**
-   * IA: Generar clase desde texto
+   * IA: Generar diagrama completo desde texto
    */
   const handleAIGenerate = async () => {
-    const text = prompt('🤖 Describe la clase que quieres crear:');
+    const text = prompt('🤖 Describe el diagrama que quieres crear (ej: "Sistema de ventas con Usuario, Producto y Pedido"):');
     if (!text || text.trim().length < 10) {
       if (text !== null) {
         alert('⚠️ La descripción debe tener al menos 10 caracteres');
@@ -202,7 +202,7 @@ export function useBackendGenerator() {
     try {
       setIsGenerating(true);
 
-      const response = await fetch(`${SERVER_URL}/api/ai/from-text`, {
+      const response = await fetch(`${SERVER_URL}/api/ai/generate-diagram`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -210,32 +210,124 @@ export function useBackendGenerator() {
         body: JSON.stringify({ text })
       });
 
-      if (response.ok) {
-        const result = await response.json();
-        console.log('AI Generated Class:', result);
-
-        if (result.name && result.attributes) {
-          const newClass = {
-            id: `class-${Date.now()}`,
-            name: result.name,
-            attributes: result.attributes || [],
-            methods: result.methods || [],
-            position: findFreePosition({ classes: diagram?.classes || [] }),
-            width: 200,
-            height: 100
-          };
-
-          addClass(newClass);
-          alert(`✅ Clase "${result.name}" generada y agregada al diagrama`);
-        } else {
-          alert('❌ No se pudo generar la clase. Intenta con otra descripción.');
-        }
-      } else {
-        alert('❌ Error al generar clase. Intenta nuevamente.');
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Error response:', errorText);
+        alert(`❌ Error al generar diagrama: ${response.status} ${response.statusText}`);
+        return;
       }
+
+      const result = await response.json();
+      console.log('AI Generated Diagram:', result);
+
+      // Verificar que la respuesta tenga la estructura esperada
+      if (!result.classes || !Array.isArray(result.classes) || result.classes.length === 0) {
+        alert('❌ No se pudieron generar clases. Intenta con otra descripción.');
+        return;
+      }
+
+      // Crear mapa de nombres de clases a IDs para las relaciones
+      const nameToIdMap = new Map<string, string>();
+      const existingClasses = diagram?.classes || [];
+      const baseTime = Date.now();
+      
+      // Crear nuevas clases con posiciones calculadas
+      const newClasses: any[] = [];
+      result.classes.forEach((cls: any, index: number) => {
+        const classId = `ai-class-${baseTime}-${index}`;
+        nameToIdMap.set(cls.name, classId);
+        
+        // Calcular posición libre considerando clases existentes y nuevas ya creadas
+        const allClassesSoFar = [...existingClasses, ...newClasses];
+        const freePos = findFreePosition({ classes: allClassesSoFar });
+        
+        newClasses.push({
+          id: classId,
+          name: cls.name,
+          attributes: cls.attributes || [],
+          methods: [], // No incluir métodos/procedimientos
+          position: {
+            x: freePos.x + (index % 3) * 250,
+            y: freePos.y + Math.floor(index / 3) * 200
+          },
+          width: 200,
+          height: 100
+        });
+      });
+
+      // Convertir relaciones del backend al formato del frontend
+      const validRelationTypes = ['ONE_TO_ONE', 'ONE_TO_MANY', 'MANY_TO_ONE', 'MANY_TO_MANY', 'INHERITANCE', 'COMPOSITION', 'AGGREGATION'];
+      const newRelations = (result.relations || []).map((rel: any, index: number) => {
+        const sourceId = nameToIdMap.get(rel.source) || rel.source;
+        const targetId = nameToIdMap.get(rel.target) || rel.target;
+        
+        // Normalizar tipo de relación
+        let relationType = (rel.type || 'ONE_TO_MANY').toUpperCase();
+        if (!validRelationTypes.includes(relationType)) {
+          relationType = 'ONE_TO_MANY';
+        }
+        
+        // Determinar cardinalidades por defecto si no se proporcionan
+        let sourceCardinality = rel.sourceCardinality || '1';
+        let targetCardinality = rel.targetCardinality || '*';
+        
+        if (!rel.sourceCardinality || !rel.targetCardinality) {
+          switch (relationType) {
+            case 'ONE_TO_ONE':
+              sourceCardinality = '1';
+              targetCardinality = '1';
+              break;
+            case 'ONE_TO_MANY':
+              sourceCardinality = '1';
+              targetCardinality = '*';
+              break;
+            case 'MANY_TO_ONE':
+              sourceCardinality = '*';
+              targetCardinality = '1';
+              break;
+            case 'MANY_TO_MANY':
+              sourceCardinality = '*';
+              targetCardinality = '*';
+              break;
+            case 'INHERITANCE':
+            case 'COMPOSITION':
+            case 'AGGREGATION':
+              sourceCardinality = '1';
+              targetCardinality = '*';
+              break;
+          }
+        }
+        
+        return {
+          id: rel.id || `ai-relation-${baseTime}-${index}`,
+          type: relationType as any,
+          source: sourceId,
+          target: targetId,
+          sourceCardinality,
+          targetCardinality,
+          mappedBy: rel.mappedBy || undefined,
+          joinColumn: rel.joinColumn || undefined,
+          label: rel.label || rel.sourceLabel || rel.targetLabel || undefined
+        };
+      });
+
+      // Crear nuevo diagrama o actualizar el existente
+      const newDiagram = {
+        id: diagram?.id || `diagram-${Date.now()}`,
+        name: diagram?.name || 'Diagrama Generado por IA',
+        package: diagram?.package || 'com.example',
+        classes: [...(diagram?.classes || []), ...newClasses],
+        relations: [...(diagram?.relations || []), ...newRelations],
+        createdAt: diagram?.createdAt || new Date(),
+        updatedAt: new Date()
+      };
+
+      setDiagram(newDiagram);
+      
+      alert(`✅ Diagrama generado exitosamente!\n\nClases: ${newClasses.length}\nRelaciones: ${newRelations.length}`);
     } catch (error) {
-      console.error('Error generating from text:', error);
-      alert('❌ Error de conexión. Verifica que el servidor esté corriendo.');
+      console.error('Error generating diagram from text:', error);
+      alert(`❌ Error de conexión: ${error instanceof Error ? error.message : 'Error desconocido'}\n\nVerifica que el servidor esté corriendo.`);
     } finally {
       setIsGenerating(false);
     }

@@ -13,7 +13,11 @@ export interface DiagramModel {
   relations: Array<{
     from?: string;
     to?: string;
+    source?: string;  // Alias para from
+    target?: string;  // Alias para to
     type?: string;
+    sourceCardinality?: string;
+    targetCardinality?: string;
   }>;
 }
 
@@ -61,16 +65,39 @@ export async function handleImageToDiagram(inputPath: string, options?: { useLLM
     '     * TODOS los atributos (con visibilidad: +, -, #, ~)',
     '     * TODOS los métodos (con visibilidad y parámetros si están visibles)',
     '   - Si una clase tiene atributos o métodos, DEBES incluirlos todos',
+    '   - Si hay una clase intermedia (join class) para relaciones muchos a muchos, inclúyela también',
     '',
     '2. RELACIONES:',
     '   - Identifica TODAS las relaciones entre clases',
-    '   - Tipos de relación:',
-    '     * "inheritance" o "extends" para herencia (flecha con triángulo)',
-    '     * "association" para asociación (línea simple)',
-    '     * "aggregation" para agregación (diamante vacío)',
-    '     * "composition" para composición (diamante lleno)',
-    '     * "dependency" para dependencia (línea punteada)',
-    '   - Incluye la dirección: "from" (origen) y "to" (destino)',
+    '   - Tipos de relación UML soportados:',
+    '     * "INHERITANCE" o "inheritance" o "extends" para herencia (flecha con triángulo apuntando a la clase padre)',
+    '     * "COMPOSITION" o "composition" para composición (diamante lleno/relleno, relación parte-todo fuerte)',
+    '     * "AGGREGATION" o "aggregation" para agregación (diamante vacío, relación parte-todo débil)',
+    '     * "ONE_TO_ONE" o "one_to_one" para relación uno a uno (cardinalidad 1:1)',
+    '     * "ONE_TO_MANY" o "one_to_many" para relación uno a muchos (cardinalidad 1:* o 1..*)',
+    '     * "MANY_TO_ONE" o "many_to_one" para relación muchos a uno (cardinalidad *:1 o *..1)',
+    '     * "MANY_TO_MANY" o "many_to_many" para relación muchos a muchos (cardinalidad *:* o *..*)',
+    '     * "association" como fallback para asociación simple (línea simple sin adornos)',
+    '',
+    '   - CARDINALIDADES:',
+    '     * Observa las etiquetas de cardinalidad en los extremos de las relaciones',
+    '     * Cardinalidades comunes: "1", "*", "0..1", "1..*", "0..*", "n", "m"',
+    '     * Si hay cardinalidad "1" en origen y "*" en destino → ONE_TO_MANY',
+    '     * Si hay cardinalidad "*" en origen y "1" en destino → MANY_TO_ONE',
+    '     * Si hay cardinalidad "1" en ambos extremos → ONE_TO_ONE',
+    '     * Si hay cardinalidad "*" en ambos extremos → MANY_TO_MANY',
+    '',
+    '   - RELACIONES MUCHOS A MUCHOS:',
+    '     * Si hay una clase intermedia (join class) entre dos clases principales,',
+    '       identifica las dos relaciones ONE_TO_MANY desde las clases principales hacia la clase intermedia',
+    '     * Si hay una relación directa con cardinalidad *:* entre dos clases,',
+    '       identifica el tipo como MANY_TO_MANY',
+    '',
+    '   - DIRECCIÓN:',
+    '     * "from" (origen): ID de la clase origen',
+    '     * "to" (destino): ID de la clase destino',
+    '     * Para herencia: "from" es la clase hija, "to" es la clase padre',
+    '     * Para composición/agregación: "from" es la parte, "to" es el todo',
     '',
     '3. FORMATO DE RESPUESTA:',
     '   - Devuelve SOLO un objeto JSON válido',
@@ -89,14 +116,18 @@ export async function handleImageToDiagram(inputPath: string, options?: { useLLM
     '    {',
     '      "from": "c1",',
     '      "to": "c2",',
-    '      "type": "inheritance"',
+    '      "type": "INHERITANCE|COMPOSITION|AGGREGATION|ONE_TO_ONE|ONE_TO_MANY|MANY_TO_ONE|MANY_TO_MANY|association",',
+    '      "sourceCardinality": "1|*|0..1|1..*|0..*",',
+    '      "targetCardinality": "1|*|0..1|1..*|0..*"',
     '    }',
     '  ]',
     '}',
     '',
     '4. IMPORTANTE:',
     '   - Si una clase tiene atributos visibles en la imagen, DEBES incluirlos',
-    '   - Si hay relaciones visibles entre clases, DEBES incluirlas',
+    '   - Si hay relaciones visibles entre clases, DEBES incluirlas con sus tipos y cardinalidades',
+    '   - Observa cuidadosamente los adornos visuales (flechas, diamantes) para determinar el tipo de relación',
+    '   - Observa las etiquetas de cardinalidad para determinar ONE_TO_MANY, MANY_TO_ONE, etc.',
     '   - No inventes información que no esté en la imagen',
     '   - Sé preciso y completo',
     '',
@@ -109,6 +140,56 @@ export async function handleImageToDiagram(inputPath: string, options?: { useLLM
     imagePath: pre.processedPath, 
     timeoutMs: 60_000 // 60 segundos para análisis completo
   });
+
+  // Función para normalizar tipos de relación de Gemini a tipos estándar
+  const normalizeRelationType = (type: string): string => {
+    if (!type) return 'ONE_TO_MANY';
+    
+    const normalized = type.toUpperCase().trim();
+    
+    // Mapear tipos de Gemini a tipos estándar
+    if (normalized.includes('INHERITANCE') || normalized.includes('EXTENDS') || normalized === 'INHERIT') {
+      return 'INHERITANCE';
+    }
+    if (normalized.includes('COMPOSITION') || normalized.includes('COMPOSE')) {
+      return 'COMPOSITION';
+    }
+    if (normalized.includes('AGGREGATION') || normalized.includes('AGGREGATE')) {
+      return 'AGGREGATION';
+    }
+    if (normalized === 'ONE_TO_ONE' || normalized === '1_TO_1' || normalized === '1:1') {
+      return 'ONE_TO_ONE';
+    }
+    if (normalized === 'ONE_TO_MANY' || normalized === '1_TO_MANY' || normalized === '1:N' || normalized === '1:*') {
+      return 'ONE_TO_MANY';
+    }
+    if (normalized === 'MANY_TO_ONE' || normalized === 'MANY_TO_1' || normalized === 'N:1' || normalized === '*:1') {
+      return 'MANY_TO_ONE';
+    }
+    if (normalized === 'MANY_TO_MANY' || normalized === 'MANY_TO_MANY' || normalized === 'N:M' || normalized === '*:*' || normalized === 'M:N') {
+      return 'MANY_TO_MANY';
+    }
+    
+    // Fallback: si es association, intentar determinar por cardinalidades
+    if (normalized.includes('ASSOCIATION') || normalized === 'ASSOC') {
+      return 'ONE_TO_MANY'; // Por defecto
+    }
+    
+    return 'ONE_TO_MANY'; // Por defecto
+  };
+
+  // Función para normalizar cardinalidades
+  const normalizeCardinality = (card: string | undefined): string => {
+    if (!card) return '*';
+    const normalized = card.trim();
+    // Normalizar variaciones comunes
+    if (normalized === 'n' || normalized === 'N' || normalized === '*' || normalized === 'many') return '*';
+    if (normalized === '1' || normalized === 'one' || normalized === 'uno') return '1';
+    if (normalized === '0..1' || normalized === '0-1' || normalized === '0 to 1') return '0..1';
+    if (normalized === '1..*' || normalized === '1-*' || normalized === '1 to many' || normalized === '1..n') return '1..*';
+    if (normalized === '0..*' || normalized === '0-*' || normalized === '0 to many' || normalized === '0..n') return '0..*';
+    return normalized; // Mantener si ya está normalizada
+  };
 
   // 5) Validar y normalizar respuesta de Gemini
   let gemNormalized: DiagramModel | null = null;
@@ -124,11 +205,51 @@ export async function handleImageToDiagram(inputPath: string, options?: { useLLM
           attributes: Array.isArray(c.attributes) ? c.attributes : [],
         })),
         relations: Array.isArray(gemini.normalized.relations) 
-          ? gemini.normalized.relations.map((r: any) => ({
-              from: r.from || r.fromId,
-              to: r.to || r.toId,
-              type: r.type || 'association',
-            }))
+          ? gemini.normalized.relations.map((r: any) => {
+              const normalizedType = normalizeRelationType(r.type);
+              const sourceCard = normalizeCardinality(r.sourceCardinality);
+              const targetCard = normalizeCardinality(r.targetCardinality);
+              
+              // Si no hay cardinalidades pero hay tipo, inferir cardinalidades por defecto
+              let finalSourceCard = sourceCard;
+              let finalTargetCard = targetCard;
+              
+              if (sourceCard === '*' && targetCard === '*') {
+                // Si ambas son *, usar las proporcionadas o inferir según tipo
+                switch (normalizedType) {
+                  case 'ONE_TO_ONE':
+                    finalSourceCard = '1';
+                    finalTargetCard = '1';
+                    break;
+                  case 'ONE_TO_MANY':
+                    finalSourceCard = '1';
+                    finalTargetCard = '*';
+                    break;
+                  case 'MANY_TO_ONE':
+                    finalSourceCard = '*';
+                    finalTargetCard = '1';
+                    break;
+                  case 'MANY_TO_MANY':
+                    finalSourceCard = '*';
+                    finalTargetCard = '*';
+                    break;
+                  case 'INHERITANCE':
+                  case 'COMPOSITION':
+                  case 'AGGREGATION':
+                    finalSourceCard = '1';
+                    finalTargetCard = '*';
+                    break;
+                }
+              }
+              
+              return {
+                from: r.from || r.fromId || r.source,
+                to: r.to || r.toId || r.target,
+                type: normalizedType,
+                sourceCardinality: finalSourceCard,
+                targetCardinality: finalTargetCard,
+              };
+            })
           : [],
       };
       finalDiagram = gemNormalized;
@@ -152,7 +273,53 @@ export async function handleImageToDiagram(inputPath: string, options?: { useLLM
             name: c.name || `Class${index + 1}`,
             attributes: Array.isArray(c.attributes) ? c.attributes : [],
           })),
-          relations: Array.isArray(parsed.relations) ? parsed.relations : [],
+          relations: Array.isArray(parsed.relations) 
+            ? parsed.relations.map((r: any) => {
+                const normalizedType = normalizeRelationType(r.type);
+                const sourceCard = normalizeCardinality(r.sourceCardinality);
+                const targetCard = normalizeCardinality(r.targetCardinality);
+                
+                // Si no hay cardinalidades pero hay tipo, inferir cardinalidades por defecto
+                let finalSourceCard = sourceCard;
+                let finalTargetCard = targetCard;
+                
+                if (sourceCard === '*' && targetCard === '*') {
+                  // Si ambas son *, usar las proporcionadas o inferir según tipo
+                  switch (normalizedType) {
+                    case 'ONE_TO_ONE':
+                      finalSourceCard = '1';
+                      finalTargetCard = '1';
+                      break;
+                    case 'ONE_TO_MANY':
+                      finalSourceCard = '1';
+                      finalTargetCard = '*';
+                      break;
+                    case 'MANY_TO_ONE':
+                      finalSourceCard = '*';
+                      finalTargetCard = '1';
+                      break;
+                    case 'MANY_TO_MANY':
+                      finalSourceCard = '*';
+                      finalTargetCard = '*';
+                      break;
+                    case 'INHERITANCE':
+                    case 'COMPOSITION':
+                    case 'AGGREGATION':
+                      finalSourceCard = '1';
+                      finalTargetCard = '*';
+                      break;
+                  }
+                }
+                
+                return {
+                  from: r.from || r.fromId || r.source,
+                  to: r.to || r.toId || r.target,
+                  type: normalizedType,
+                  sourceCardinality: finalSourceCard,
+                  targetCardinality: finalTargetCard,
+                };
+              })
+            : [],
         };
         finalDiagram = gemNormalized;
       }

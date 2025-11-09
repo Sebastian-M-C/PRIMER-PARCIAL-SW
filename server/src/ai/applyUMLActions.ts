@@ -16,6 +16,52 @@ function genId(prefix = 'rel'): string {
 }
 
 /**
+ * Infiere el tipo de dato de un atributo basándose en su nombre
+ */
+function inferAttributeType(attributeName: string): string {
+  if (!attributeName) return 'String';
+  
+  const name = attributeName.toLowerCase();
+  
+  // IDs
+  if (name === 'id' || name.endsWith('id')) {
+    return 'Long';
+  }
+  
+  // Booleanos
+  if (name.startsWith('is') || name.startsWith('has') || name.startsWith('can') || 
+      name === 'activo' || name === 'habilitado' || name === 'visible' || 
+      name === 'eliminado' || name === 'enabled' || name === 'disabled') {
+    return 'Boolean';
+  }
+  
+  // Fechas
+  if (name.includes('fecha') || name.includes('date') || name.includes('time') ||
+      name.includes('created') || name.includes('updated') || name.includes('deleted')) {
+    return 'LocalDateTime';
+  }
+  
+  // Números enteros
+  if (name.includes('edad') || name.includes('age') || name.includes('año') || 
+      name.includes('year') || name.includes('cantidad') || name.includes('quantity') ||
+      name.includes('stock') || name.includes('numero') || name.includes('number')) {
+    return 'Long';
+  }
+  
+  // Números decimales
+  if (name.includes('precio') || name.includes('price') || name.includes('costo') ||
+      name.includes('cost') || name.includes('total') || name.includes('monto') ||
+      name.includes('amount') || name.includes('saldo') || name.includes('balance') ||
+      name.includes('descuento') || name.includes('discount') || name.includes('impuesto') ||
+      name.includes('tax') || name.includes('porcentaje') || name.includes('percentage')) {
+    return 'BigDecimal';
+  }
+  
+  // Por defecto, String
+  return 'String';
+}
+
+/**
  * Obtiene la cardinalidad por defecto según el tipo de relación y la posición (source/target)
  */
 function getDefaultCardinality(relationType: string, position: 'source' | 'target'): string {
@@ -90,7 +136,18 @@ export function applyActionsToDiagram(currentDiagram: any, actions: any[]): any 
         const cls = diagram.classes.find((c: any) => c.name === className);
         if (!cls) break;
         cls.attributes = Array.isArray(cls.attributes) ? cls.attributes : [];
-        const attr = payload || { name: 'nuevo', type: 'String', nullable: false };
+        
+        // Si el payload no tiene tipo, inferirlo del nombre del atributo
+        let attr = payload || { name: 'nuevo', type: 'String', nullable: false };
+        if (!attr.type && attr.name) {
+          attr = { ...attr, type: inferAttributeType(attr.name) };
+        }
+        
+        // Si es un ID, marcar isId como true
+        if (attr.name && (attr.name.toLowerCase() === 'id' || attr.name.toLowerCase().endsWith('id'))) {
+          attr = { ...attr, isId: true, type: 'Long' };
+        }
+        
         if (!cls.attributes.some((a: any) => a.name === attr.name)) {
           cls.attributes.push(attr);
         }
@@ -99,14 +156,38 @@ export function applyActionsToDiagram(currentDiagram: any, actions: any[]): any 
 
       case 'UPDATE_ATTRIBUTE': {
         const className = target.className;
-        const attrName = target.attributeName;
+        const attrName = target.attributeName || target.newAttributeName;
         if (!className || !attrName) break;
         const cls = diagram.classes.find((c: any) => c.name === className);
         if (!cls) break;
         cls.attributes = Array.isArray(cls.attributes) ? cls.attributes : [];
-        const idx = cls.attributes.findIndex((a: any) => a.name === attrName);
+        
+        // Buscar por nombre actual o nuevo nombre
+        let idx = cls.attributes.findIndex((a: any) => a.name === attrName);
+        if (idx === -1 && target.attributeName) {
+          // Si no se encuentra, buscar por el nombre original
+          idx = cls.attributes.findIndex((a: any) => a.name === target.attributeName);
+        }
+        
         if (idx !== -1 && payload) {
-          cls.attributes[idx] = { ...cls.attributes[idx], ...payload };
+          // Si se cambia el nombre, actualizarlo
+          const updatedAttr = { ...cls.attributes[idx], ...payload };
+          if (payload.name && payload.name !== attrName) {
+            updatedAttr.name = payload.name;
+          }
+          
+          // Si no se especifica el tipo, inferirlo del nuevo nombre
+          if (!updatedAttr.type && updatedAttr.name) {
+            updatedAttr.type = inferAttributeType(updatedAttr.name);
+          }
+          
+          // Si es un ID, marcar isId como true
+          if (updatedAttr.name && (updatedAttr.name.toLowerCase() === 'id' || updatedAttr.name.toLowerCase().endsWith('id'))) {
+            updatedAttr.isId = true;
+            updatedAttr.type = 'Long';
+          }
+          
+          cls.attributes[idx] = updatedAttr;
         }
         break;
       }

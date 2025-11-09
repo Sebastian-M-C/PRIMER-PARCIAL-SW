@@ -1,7 +1,126 @@
 import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { handleImageToDiagram, handleImageBufferToDiagram } from '../ai/gemini/orchestrator';
+import { handleImageToDiagram, handleImageBufferToDiagram, DiagramModel } from '../ai/gemini/orchestrator';
+
+/**
+ * Transforma el DiagramModel de Gemini al formato esperado por el frontend
+ * - Convierte from/to a source/target usando nombres de clases
+ * - Normaliza tipos de relación
+ * - Asegura que las cardinalidades estén presentes
+ */
+function transformGeminiDiagramToFrontendFormat(geminiDiagram: DiagramModel): any {
+  // Crear mapa de IDs a nombres de clases
+  const idToNameMap = new Map<string, string>();
+  geminiDiagram.classes.forEach(cls => {
+    idToNameMap.set(cls.id, cls.name);
+  });
+
+  // Transformar clases
+  const transformedClasses = geminiDiagram.classes.map(cls => ({
+    name: cls.name,
+    attributes: cls.attributes || [],
+    methods: [] // Gemini no extrae métodos por ahora
+  }));
+
+  // Transformar relaciones
+  const transformedRelations = geminiDiagram.relations.map((rel, index) => {
+    // Resolver source y target (pueden ser IDs o nombres)
+    const sourceId = rel.from || rel.source;
+    const targetId = rel.to || rel.target;
+    
+    const sourceName = idToNameMap.get(sourceId || '') || sourceId || '';
+    const targetName = idToNameMap.get(targetId || '') || targetId || '';
+
+    // Normalizar tipo de relación
+    const validTypes = ['ONE_TO_ONE', 'ONE_TO_MANY', 'MANY_TO_ONE', 'MANY_TO_MANY', 'INHERITANCE', 'COMPOSITION', 'AGGREGATION'];
+    let relationType = (rel.type || 'ONE_TO_MANY').toUpperCase();
+    
+    if (relationType.includes('INHERITANCE') || relationType.includes('EXTENDS') || relationType === 'INHERIT') {
+      relationType = 'INHERITANCE';
+    } else if (relationType.includes('COMPOSITION') || relationType.includes('COMPOSE')) {
+      relationType = 'COMPOSITION';
+    } else if (relationType.includes('AGGREGATION') || relationType.includes('AGGREGATE')) {
+      relationType = 'AGGREGATION';
+    } else if (relationType === 'ONE_TO_ONE' || relationType === '1_TO_1' || relationType === '1:1') {
+      relationType = 'ONE_TO_ONE';
+    } else if (relationType === 'ONE_TO_MANY' || relationType === '1_TO_MANY' || relationType === '1:N' || relationType === '1:*') {
+      relationType = 'ONE_TO_MANY';
+    } else if (relationType === 'MANY_TO_ONE' || relationType === 'MANY_TO_1' || relationType === 'N:1' || relationType === '*:1') {
+      relationType = 'MANY_TO_ONE';
+    } else if (relationType === 'MANY_TO_MANY' || relationType === 'N:M' || relationType === '*:*' || relationType === 'M:N') {
+      relationType = 'MANY_TO_MANY';
+    } else {
+      relationType = 'ONE_TO_MANY'; // Por defecto
+    }
+
+    // Validar que el tipo sea válido
+    if (!validTypes.includes(relationType)) {
+      relationType = 'ONE_TO_MANY';
+    }
+
+    // Función para normalizar cardinalidades
+    const normalizeCard = (card: string | undefined): string => {
+      if (!card) return '*';
+      const normalized = card.trim();
+      if (normalized === 'n' || normalized === 'N' || normalized === '*' || normalized === 'many') return '*';
+      if (normalized === '1' || normalized === 'one' || normalized === 'uno') return '1';
+      if (normalized === '0..1' || normalized === '0-1' || normalized === '0 to 1') return '0..1';
+      if (normalized === '1..*' || normalized === '1-*' || normalized === '1 to many' || normalized === '1..n') return '1..*';
+      if (normalized === '0..*' || normalized === '0-*' || normalized === '0 to many' || normalized === '0..n') return '0..*';
+      return normalized;
+    };
+
+    // Normalizar cardinalidades
+    let sourceCardinality = normalizeCard(rel.sourceCardinality);
+    let targetCardinality = normalizeCard(rel.targetCardinality);
+
+    // Si no se proporcionaron cardinalidades o ambas son * (por defecto), inferir según tipo
+    const hasProvidedCardinalities = rel.sourceCardinality || rel.targetCardinality;
+    if (!hasProvidedCardinalities || (sourceCardinality === '*' && targetCardinality === '*')) {
+      switch (relationType) {
+        case 'ONE_TO_ONE':
+          sourceCardinality = '1';
+          targetCardinality = '1';
+          break;
+        case 'ONE_TO_MANY':
+          sourceCardinality = '1';
+          targetCardinality = '*';
+          break;
+        case 'MANY_TO_ONE':
+          sourceCardinality = '*';
+          targetCardinality = '1';
+          break;
+        case 'MANY_TO_MANY':
+          sourceCardinality = '*';
+          targetCardinality = '*';
+          break;
+        case 'INHERITANCE':
+        case 'COMPOSITION':
+        case 'AGGREGATION':
+          sourceCardinality = '1';
+          targetCardinality = '*';
+          break;
+        default:
+          // Mantener las cardinalidades normalizadas si no hay tipo específico
+          break;
+      }
+    }
+
+    return {
+      source: sourceName,
+      target: targetName,
+      type: relationType,
+      sourceCardinality,
+      targetCardinality
+    };
+  });
+
+  return {
+    classes: transformedClasses,
+    relations: transformedRelations
+  };
+}
 
 const router = Router();
 
@@ -82,9 +201,12 @@ router.post(
           });
         }
 
+        // Transformar diagrama de Gemini al formato esperado por el frontend
+        const transformedDiagram = transformGeminiDiagramToFrontendFormat(result.diagram);
+
         // Formato de respuesta similar al del amigo
         return res.json({
-          diagram: result.diagram,
+          diagram: transformedDiagram,
           meta
         });
       }
@@ -122,8 +244,11 @@ router.post(
           });
         }
 
+        // Transformar diagrama de Gemini al formato esperado por el frontend
+        const transformedDiagram = transformGeminiDiagramToFrontendFormat(result.diagram);
+
         return res.json({
-          diagram: result.diagram,
+          diagram: transformedDiagram,
           meta
         });
       }
