@@ -1,0 +1,141 @@
+/* Estilos base del contenedor del editor de clases */
+.class-editor { }
+
+/* Estilo del título principal del editor (Edit: NombreClase) */
+.class-editor__title {
+  margin: 0 0 16px 0;
+  font-size: 16px;
+  color: #0d6efd; /* títulos en azul */
+}
+
+/* Separación entre secciones dentro del editor */
+.class-editor__section {
+  margin-bottom: 16px;
+}
+
+/* Etiqueta de campo (ej. "Nombre de Clase", "Atributos") */
+.class-editor__label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #0d6efd;
+}
+
+/* Input principal para editar el nombre de la clase */
+.class-editor__input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font-size: 14px;
+  color: #212529;
+  background-color: white;
+}
+
+/* Cabecera de la sección de atributos (título + botón agregar) */
+.attributes-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+/* Botones primarios y de añadir (estilo compacto) */
+.btn-primary, .btn-add {
+  padding: 4px 8px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+/* Fila que contiene un atributo (nombre, tipo, id, acciones) */
+.attr-row {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 4px;
+  align-items: center;
+}
+
+/* Contenedor del nombre del atributo y su ancho relativo */
+.attr-name { flex: 0.4; }
+/* Estilos del input para nombre del atributo */
+.attr-name input {
+  width: 100%;
+  padding: 6px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #212529;
+  background-color: white;
+}
+
+/* Contenedor del selector de tipo y su ancho relativo */
+.attr-type { flex: 0.7; }
+/* Estilos del select de tipo del atributo */
+.attr-type select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font-size: 12px;
+  background-color: white;
+  color: #212529;
+}
+
+/* Checkbox y etiqueta pequeña para marcar ID */
+.attr-id {
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  color: #212529;
+}
+
+/* Botón para eliminar un atributo (estilo compacto) */
+.btn-delete {
+  padding: 2px 4px;
+  background-color: #dc3545;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+/* Contenedor y estilos para filas de métodos (nombre + retorno + acciones) */
+.method-row { display: flex; gap: 4px; margin-bottom: 4px; align-items: center; }
+/* Ancho relativo del campo nombre de método */
+.method-name { flex: 0.55; }
+/* Ancho relativo del campo tipo de retorno */
+.method-return { flex: 0.45; }
+/* Inputs dentro de la sección métodos */
+.method-name input, .method-return input {
+  width: 100%;
+  padding: 6px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #212529;
+  background-color: white;
+}
+
+/* Sección y estilo del botón para eliminar toda la clase */
+.class-delete {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid #dee2e6;
+}
+.class-delete .btn-full {
+  width: 100%;
+  padding: 8px;
+  background-color: #dc3545;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}

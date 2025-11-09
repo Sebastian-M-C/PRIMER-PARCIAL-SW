@@ -1,0 +1,28 @@
+/* Contenedor principal del sidebar: tamaño, fondo y disposición */
+.sidebar {
+  width: 350px;
+  height: 100vh;
+  background-color: #f8f9fa;
+  border-left: 1px solid #dee2e6;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* NO aplicar color global a h3/label dentro de .sidebar: provoca herencia indeseada.
+   Si quieres títulos azules, añadir clase específica en SidebarHeader (por ejemplo .sidebar-header__title). */
+
+/* Evitar que los enlaces hereden color blanco de reglas previas */
+.sidebar a {
+  color: initial;
+}
+
+/* Área interna desplazable donde va el editor / contenido */
+.sidebar__content {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+}
+
+/* Espacio para posibles reglas futuras (botones, header, etc.) */
+/* .sidebar .actions { ... } */

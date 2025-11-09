@@ -8,6 +8,7 @@ import { ActionButtons } from './components/ActionButtons';
 import { ClassEditor } from './components/ClassEditor';
 import { RelationEditor } from './components/RelationEditor';
 import { EmptyState } from './components/EmptyState';
+import './Sidebar.css';
 
 export const Sidebar: React.FC = () => {
   const {
@@ -52,15 +53,8 @@ export const Sidebar: React.FC = () => {
 
 
   return (
-    <div className="sidebar" style={{
-      width: '350px',
-      height: '100vh',
-      backgroundColor: '#f8f9fa',
-      borderLeft: '1px solid #dee2e6',
-      display: 'flex',
-      flexDirection: 'column',
-      overflow: 'hidden'
-    }}>
+    <div className="sidebar">
+      {/* Títulos y labels se controlan desde CSS específico; quitar estilo inline para evitar herencias no deseadas */}
       {/* Header */}
       <SidebarHeader classCount={diagram?.classes.length || 0} />
 
@@ -81,7 +75,7 @@ export const Sidebar: React.FC = () => {
       />
 
       {/* Editor Panel */}
-      <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
+      <div className="sidebar__content">
         {selectedClass ? (
           <ClassEditor
             selectedClass={selectedClass}

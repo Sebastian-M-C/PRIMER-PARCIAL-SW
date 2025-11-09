@@ -1,6 +1,7 @@
 import React from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { UMLClass, UMLAttribute, UMLMethod } from '../../../types/uml';
+import './style/ClassEditor.css';
 
 interface ClassEditorProps {
   selectedClass: UMLClass;
@@ -25,46 +26,45 @@ export const ClassEditor: React.FC<ClassEditorProps> = ({
   onDeleteMethod,
   onDeleteClass
 }) => {
+  const typeOptions = [
+    '',
+    'String',
+    'Long',
+    'Integer',
+    'Float',
+    'Double',
+    'Boolean',
+    'LocalDate',
+    'LocalDateTime',
+    'Date',
+    'BigDecimal'
+  ];
   return (
-    <div>
-      <h3 style={{ margin: '0 0 16px 0', fontSize: '16px' }}>
+    <div className="class-editor">
+      <h3 className="class-editor__title">
         Edit: {selectedClass.name}
       </h3>
 
       {/* Nombre de Clase */}
-      <div style={{ marginBottom: '16px' }}>
-        <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px', fontWeight: '500' }}>
+      <div className="class-editor__section">
+        <label className="class-editor__label">
           Nombre de Clase
         </label>
         <input
+          className="class-editor__input"
           type="text"
           value={selectedClass.name}
           onChange={(e) => onClassUpdate({ name: e.target.value })}
-          style={{
-            width: '100%',
-            padding: '8px',
-            border: '1px solid #ced4da',
-            borderRadius: '4px',
-            fontSize: '14px'
-          }}
         />
       </div>
 
       {/* Atributos */}
-      <div style={{ marginBottom: '16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-          <label style={{ fontSize: '14px', fontWeight: '500' }}>Atributos</label>
+      <div className="class-editor__section">
+        <div className="attributes-header">
+          <label className="class-editor__label" style={{ margin: 0 }}>Atributos</label>
           <button
             onClick={onAddAttribute}
-            style={{
-              padding: '4px 8px',
-              backgroundColor: '#007bff',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontSize: '12px'
-            }}
+            className="btn-add"
             title="Agregar nuevo atributo"
           >
             <Plus size={12} />
@@ -72,39 +72,30 @@ export const ClassEditor: React.FC<ClassEditorProps> = ({
         </div>
 
         {(selectedClass.attributes ?? []).map((attr, index) => (
-          <div key={index} style={{
-            display: 'flex',
-            gap: '4px',
-            marginBottom: '4px',
-            alignItems: 'center'
-          }}>
-            <input
-              type="text"
-              value={attr.name}
-              onChange={(e) => onUpdateAttribute(index, { name: e.target.value })}
-              placeholder="nombre"
-              style={{
-                flex: 1,
-                padding: '4px',
-                border: '1px solid #ced4da',
-                borderRadius: '4px',
-                fontSize: '12px'
-              }}
-            />
-            <input
-              type="text"
-              value={attr.type}
-              onChange={(e) => onUpdateAttribute(index, { type: e.target.value })}
-              placeholder="tipo"
-              style={{
-                flex: 1,
-                padding: '4px',
-                border: '1px solid #ced4da',
-                borderRadius: '4px',
-                fontSize: '12px'
-              }}
-            />
-            <label style={{ fontSize: '10px', display: 'flex', alignItems: 'center', gap: '2px' }}>
+          <div key={index} className="attr-row">
+            <div className="attr-name">
+              <input
+                type="text"
+                value={attr.name}
+                onChange={(e) => onUpdateAttribute(index, { name: e.target.value })}
+                placeholder="nombre"
+              />
+            </div>
+
+            <div className="attr-type">
+              <select
+                value={attr.type || ''}
+                onChange={(e) => onUpdateAttribute(index, { type: e.target.value })}
+              >
+                {typeOptions.map((t) => (
+                  <option key={t} value={t}>
+                    {t === '' ? 'Seleccionar tipo' : t}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <label className="attr-id">
               <input
                 type="checkbox"
                 checked={attr.isId || false}
@@ -112,17 +103,10 @@ export const ClassEditor: React.FC<ClassEditorProps> = ({
               />
               ID
             </label>
+
             <button
               onClick={() => onDeleteAttribute(index)}
-              style={{
-                padding: '2px 4px',
-                backgroundColor: '#dc3545',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '10px'
-              }}
+              className="btn-delete"
               title="Eliminar atributo"
             >
               <Trash2 size={10} />
@@ -133,19 +117,11 @@ export const ClassEditor: React.FC<ClassEditorProps> = ({
 
       {/* Métodos */}
       <div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-          <label style={{ fontSize: '14px', fontWeight: '500' }}>Métodos</label>
+        <div className="attributes-header" style={{ marginBottom: 8 }}>
+          <label className="class-editor__label" style={{ margin: 0 }}>Métodos</label>
           <button
             onClick={onAddMethod}
-            style={{
-              padding: '4px 8px',
-              backgroundColor: '#007bff',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontSize: '12px'
-            }}
+            className="btn-add"
             title="Agregar nuevo método"
           >
             <Plus size={12} />
@@ -153,49 +129,26 @@ export const ClassEditor: React.FC<ClassEditorProps> = ({
         </div>
 
         {(selectedClass.methods ?? []).map((method, index) => (
-          <div key={index} style={{
-            display: 'flex',
-            gap: '4px',
-            marginBottom: '4px',
-            alignItems: 'center'
-          }}>
-            <input
-              type="text"
-              value={method.name}
-              onChange={(e) => onUpdateMethod(index, { name: e.target.value })}
-              placeholder="nombre del método"
-              style={{
-                flex: 1,
-                padding: '4px',
-                border: '1px solid #ced4da',
-                borderRadius: '4px',
-                fontSize: '12px'
-              }}
-            />
-            <input
-              type="text"
-              value={method.returnType}
-              onChange={(e) => onUpdateMethod(index, { returnType: e.target.value })}
-              placeholder="tipo de retorno"
-              style={{
-                flex: 1,
-                padding: '4px',
-                border: '1px solid #ced4da',
-                borderRadius: '4px',
-                fontSize: '12px'
-              }}
-            />
+          <div key={index} className="method-row">
+            <div className="method-name">
+              <input
+                type="text"
+                value={method.name}
+                onChange={(e) => onUpdateMethod(index, { name: e.target.value })}
+                placeholder="nombre del método"
+              />
+            </div>
+            <div className="method-return">
+              <input
+                type="text"
+                value={method.returnType}
+                onChange={(e) => onUpdateMethod(index, { returnType: e.target.value })}
+                placeholder="tipo de retorno"
+              />
+            </div>
             <button
               onClick={() => onDeleteMethod(index)}
-              style={{
-                padding: '2px 4px',
-                backgroundColor: '#dc3545',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '10px'
-              }}
+              className="btn-delete"
               title="Eliminar método"
             >
               <Trash2 size={10} />
@@ -205,19 +158,10 @@ export const ClassEditor: React.FC<ClassEditorProps> = ({
       </div>
 
       {/* Eliminar Clase */}
-      <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px solid #dee2e6' }}>
+      <div className="class-delete">
         <button
           onClick={onDeleteClass}
-          style={{
-            width: '100%',
-            padding: '8px',
-            backgroundColor: '#dc3545',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontSize: '14px'
-          }}
+          className="btn-full"
         >
           Eliminar Clase
         </button>
