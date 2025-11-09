@@ -2,8 +2,9 @@ import type { ChangeEvent } from 'react';
 import { useDiagramStore } from '../../../store/useDiagramStore';
 import { findFreePosition, generateUniqueClassName } from '../utils/positionFinder';
 import { serializeDiagram } from './diagramSerializer';
-import type { UMLDiagram, UMLClass, UMLRelation } from '../../../types/uml';
+import type { UMLDiagram, UMLClass, UMLRelation, UMLAttribute } from '../../../types/uml';
 import { modifyDiagram } from '../../../services/aiService';
+import { uploadImageFile, type ParseDiagramResult } from '../../../services/aiImageService';
 
 /**
  * importUMLFromString
@@ -365,12 +366,261 @@ export function useDiagramActions() {
     }
   };
 
+  /**
+   * Convertir resultado del API de imagen a diagrama al formato esperado por el store
+   * 
+   * El API devuelve:
+   * - classes con attributes: string[] (ej: ["+id: Long", "-nombre: String"])
+   * - relations con from/to en lugar de source/target
+   * 
+   * Necesitamos convertir a:
+   * - classes con attributes: UMLAttribute[]
+   * - relations con source/target
+   * - Agregar position, width, height a las clases
+   * - Agregar métodos vacíos si no existen
+   */
+  const convertApiResultToUMLDiagram = (apiResult: ParseDiagramResult): UMLDiagram => {
+    const apiDiagram = apiResult.diagram;
+    
+    // Función para parsear atributos desde strings (ej: "+id: Long" -> { name: "id", type: "Long", isId: false })
+    const parseAttributeString = (attrStr: string): UMLAttribute => {
+      // Formato esperado: "+id: Long", "-nombre: String", "#atributo: int"
+      const match = attrStr.match(/^([+\-#~]?)(\w+):\s*(\w+)$/);
+      if (match) {
+        const [, visibility, name, type] = match;
+        return {
+          name: name.trim(),
+          type: type.trim(),
+          nullable: false,
+          unique: false,
+          isId: name.toLowerCase() === 'id' || visibility === '+'
+        };
+      }
+      // Fallback: intentar parsear sin visibilidad
+      const parts = attrStr.split(':');
+      if (parts.length >= 2) {
+        return {
+          name: parts[0].trim().replace(/^[+\-#~]/, ''),
+          type: parts[1].trim(),
+          nullable: false,
+          unique: false,
+          isId: parts[0].toLowerCase().includes('id')
+        };
+      }
+      // Último fallback
+      return {
+        name: attrStr.trim(),
+        type: 'String',
+        nullable: false,
+        unique: false,
+        isId: false
+      };
+    };
+
+    // Convertir clases del API al formato UMLClass
+    const umlClasses: UMLClass[] = (apiDiagram.classes || []).map((cls: any, index: number) => {
+      // Parsear atributos de string[] a UMLAttribute[]
+      const attributes: UMLAttribute[] = Array.isArray(cls.attributes)
+        ? cls.attributes.map((attr: string | UMLAttribute) => {
+            if (typeof attr === 'string') {
+              return parseAttributeString(attr);
+            }
+            // Si ya es un objeto UMLAttribute, usarlo directamente
+            return attr as UMLAttribute;
+          })
+        : [];
+
+      // Calcular posición libre
+      const freePosition = findFreePosition({ classes: diagram?.classes || [] });
+      const position = cls.position || { 
+        x: freePosition.x + (index * 250), 
+        y: freePosition.y + (index % 2) * 200 
+      };
+
+      return {
+        id: cls.id || `ai-class-${Date.now()}-${index}`,
+        name: cls.name || `Class${index + 1}`,
+        attributes,
+        methods: cls.methods || [],
+        position,
+        width: cls.width || 200,
+        height: cls.height || 100
+      } as UMLClass;
+    });
+
+    // Crear mapa de nombres de clases a IDs para mapear relaciones
+    const nameToIdMap = new Map<string, string>();
+    umlClasses.forEach(cls => {
+      nameToIdMap.set(cls.name, cls.id);
+    });
+
+    // Convertir relaciones del API al formato UMLRelation
+    const umlRelations: UMLRelation[] = (apiDiagram.relations || []).map((rel: any, index: number) => {
+      // El API puede usar 'from/to' o 'source/target'
+      const sourceKey = rel.from || rel.source || rel.sourceName || rel.sourceClass;
+      const targetKey = rel.to || rel.target || rel.targetName || rel.targetClass;
+      
+      // Resolver IDs desde nombres o usar directamente si ya es ID
+      const sourceId = nameToIdMap.get(sourceKey) || sourceKey;
+      const targetId = nameToIdMap.get(targetKey) || targetKey;
+
+      // Determinar cardinalidades basadas en el tipo
+      let typeStr = (rel.type || 'association').toUpperCase();
+      
+      // Normalizar tipos comunes del API
+      if (typeStr.includes('INHERITANCE') || typeStr.includes('EXTENDS')) {
+        typeStr = 'INHERITANCE';
+      } else if (typeStr.includes('COMPOSITION')) {
+        typeStr = 'COMPOSITION';
+      } else if (typeStr.includes('AGGREGATION')) {
+        typeStr = 'AGGREGATION';
+      } else if (typeStr.includes('ONE_TO_MANY') || typeStr === 'ONE_TO_MANY') {
+        typeStr = 'ONE_TO_MANY';
+      } else if (typeStr.includes('MANY_TO_ONE') || typeStr === 'MANY_TO_ONE') {
+        typeStr = 'MANY_TO_ONE';
+      } else if (typeStr.includes('MANY_TO_MANY') || typeStr === 'MANY_TO_MANY') {
+        typeStr = 'MANY_TO_MANY';
+      } else if (typeStr.includes('ONE_TO_ONE') || typeStr === 'ONE_TO_ONE') {
+        typeStr = 'ONE_TO_ONE';
+      } else {
+        // Por defecto, usar ONE_TO_MANY
+        typeStr = 'ONE_TO_MANY';
+      }
+
+      // Determinar cardinalidades basadas en el tipo
+      let sourceCardinality = '1';
+      let targetCardinality = '1';
+      
+      if (typeStr === 'ONE_TO_MANY') {
+        sourceCardinality = '1';
+        targetCardinality = '*';
+      } else if (typeStr === 'MANY_TO_ONE') {
+        sourceCardinality = '*';
+        targetCardinality = '1';
+      } else if (typeStr === 'MANY_TO_MANY') {
+        sourceCardinality = '*';
+        targetCardinality = '*';
+      } else if (typeStr === 'ONE_TO_ONE') {
+        sourceCardinality = '1';
+        targetCardinality = '1';
+      }
+
+      return {
+        id: rel.id || `ai-relation-${Date.now()}-${index}`,
+        type: (typeStr as UMLRelation['type']) || 'ONE_TO_MANY',
+        source: sourceId,
+        target: targetId,
+        sourceCardinality: rel.sourceCardinality || sourceCardinality,
+        targetCardinality: rel.targetCardinality || targetCardinality,
+        mappedBy: rel.mappedBy || null,
+        joinColumn: rel.joinColumn || null,
+        label: rel.label || rel.sourceLabel || null
+      } as UMLRelation;
+    });
+
+    // Crear diagrama completo
+    return {
+      id: diagram?.id || `diagram-${Date.now()}`,
+      name: diagram?.name || 'Diagrama desde Imagen',
+      package: diagram?.package || 'com.example',
+      classes: umlClasses,
+      relations: umlRelations,
+      createdAt: diagram?.createdAt || new Date(),
+      updatedAt: new Date()
+    } as UMLDiagram;
+  };
+
+  /**
+   * Subir imagen y convertir a diagrama UML
+   * 
+   * - Recibe el evento del input file
+   * - Llama al servicio uploadImageFile
+   * - Convierte el resultado del API al formato UMLDiagram
+   * - Actualiza el diagrama en el store
+   */
+  const handleUploadImage = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Validar tipo de archivo
+    if (!file.type.startsWith('image/')) {
+      alert('❌ Por favor selecciona un archivo de imagen válido');
+      return;
+    }
+
+    try {
+      // Mostrar indicador de carga (opcional)
+      const loadingMsg = '⏳ Analizando imagen con IA...';
+      console.log(loadingMsg);
+
+      // Llamar al servicio
+      const result = await uploadImageFile(file, { lang: 'es', useLLM: true });
+
+      // Verificar si hay error en la respuesta
+      if (result.meta?.error) {
+        console.error('[handleUploadImage] Error del API:', result.meta.error);
+        alert(`❌ Error al procesar imagen: ${result.meta.error}`);
+        return;
+      }
+
+      // Verificar si hay diagrama en la respuesta
+      if (!result.diagram || !result.diagram.classes || result.diagram.classes.length === 0) {
+        console.warn('[handleUploadImage] No se encontraron clases en la respuesta:', result);
+        alert('⚠️ No se pudieron extraer clases del diagrama. Intenta con otra imagen.');
+        return;
+      }
+
+      // Convertir resultado del API al formato UMLDiagram
+      const umlDiagram = convertApiResultToUMLDiagram(result);
+
+      // Actualizar el diagrama en el store
+      setDiagram(umlDiagram);
+      
+      // Limpiar selección
+      if (typeof selectClass === 'function') selectClass(null);
+      if (typeof selectRelation === 'function') selectRelation(null);
+
+      // Mostrar mensaje de éxito
+      const successMsg = `✅ Diagrama generado exitosamente!\n\n` +
+        `Clases: ${umlDiagram.classes.length}\n` +
+        `Relaciones: ${umlDiagram.relations.length}\n` +
+        `Motor: ${result.meta?.engine || 'unknown'}\n` +
+        `Tiempo: ${result.meta?.elapsed || 'N/A'}`;
+      
+      alert(successMsg);
+      console.log('[handleUploadImage] Diagrama generado:', umlDiagram);
+      console.log('[handleUploadImage] Metadata:', result.meta);
+
+    } catch (error: any) {
+      console.error('[handleUploadImage] Error:', error);
+      
+      // Manejar errores específicos
+      let errorMsg = '❌ Error al procesar imagen';
+      if (error.status === 502) {
+        errorMsg = '❌ El proveedor de IA falló. Intenta nuevamente.';
+      } else if (error.status === 401) {
+        errorMsg = '❌ Error de autenticación. Verifica la configuración de la API.';
+      } else if (error.status === 504) {
+        errorMsg = '❌ Timeout. La imagen puede ser muy grande o el servidor está ocupado.';
+      } else if (error.message) {
+        errorMsg = `❌ ${error.message}`;
+      }
+      
+      alert(errorMsg);
+    } finally {
+      // Limpiar el input para permitir seleccionar el mismo archivo nuevamente
+      if (event.target) {
+        event.target.value = '';
+      }
+    }
+  };
+
   return {
     handleAddClass,
     handleResetDiagram,
     handleExportUML,
     handleImportUML,
-    // otros handlers...
-    handleAIModify // <-- nuevo handler exportado
+    handleAIModify,
+    handleUploadImage // <-- nuevo handler exportado
   };
 }

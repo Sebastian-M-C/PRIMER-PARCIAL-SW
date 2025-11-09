@@ -158,8 +158,14 @@ export async function parseVisionShapes(imagePath: string): Promise<Shape[]> {
     }
 
     return shapes;
-  } catch (err) {
-    console.warn('visionParser fallback failed:', err?.toString?.() ?? err);
+  } catch (err: any) {
+    // Error 403: API no habilitada o sin permisos - esto es normal si no tienes Google Vision API habilitada
+    const statusCode = err?.response?.status;
+    if (statusCode === 403) {
+      console.log('Google Vision API no disponible (403) para detección de formas. Continuando sin detección de formas...');
+    } else {
+      console.warn('visionParser fallback failed:', err?.message || String(err));
+    }
     return shapes;
   }
 }

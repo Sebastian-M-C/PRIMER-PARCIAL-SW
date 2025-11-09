@@ -1,198 +1,219 @@
 import path from 'path';
 import fs from 'fs';
 import { preprocessImage, PreprocessResult } from './ImageProcessor';
-import { runOCR, OCRText } from './ocr';
-import { parseVisionShapes, Shape } from './visionParser';
-import { buildDiagram, DiagramModel } from './diagramBuilder';
 import { callGemini } from './geminiClient';
+import { v4 as uuidv4 } from 'uuid';
+
+export interface DiagramModel {
+  classes: Array<{
+    id: string;
+    name: string;
+    attributes: string[];
+  }>;
+  relations: Array<{
+    from?: string;
+    to?: string;
+    type?: string;
+  }>;
+}
 
 export interface OrchestratorResult {
   pre?: PreprocessResult;
-  ocr?: OCRText[];
-  shapes?: Shape[];
   diagram: DiagramModel;
   geminiRaw?: any;
-  geminiNormalized?: any;
-}
-
-/** Utils local para normalizar/mergear rects */
-function iou(a: { x:number;y:number;w:number;h:number }, b: { x:number;y:number;w:number;h:number }) {
-  const ax2 = a.x + a.w, ay2 = a.y + a.h;
-  const bx2 = b.x + b.w, by2 = b.y + b.h;
-  const ix = Math.max(0, Math.min(ax2, bx2) - Math.max(a.x, b.x));
-  const iy = Math.max(0, Math.min(ay2, by2) - Math.max(a.y, b.y));
-  const inter = ix * iy;
-  const union = a.w * a.h + b.w * b.h - inter;
-  return union <= 0 ? 0 : inter / union;
-}
-
-function mergeRects(rects: Array<{ x:number;y:number;w:number;h:number }>, threshold = 0.35) {
-  const out: typeof rects = [];
-  const used = new Array(rects.length).fill(false);
-  for (let i = 0; i < rects.length; i++) {
-    if (used[i]) continue;
-    let base = { ...rects[i] };
-    used[i] = true;
-    for (let j = i + 1; j < rects.length; j++) {
-      if (used[j]) continue;
-      if (iou(base, rects[j]) > threshold) {
-        const minX = Math.min(base.x, rects[j].x);
-        const minY = Math.min(base.y, rects[j].y);
-        const maxX = Math.max(base.x + base.w, rects[j].x + rects[j].w);
-        const maxY = Math.max(base.y + base.h, rects[j].y + rects[j].h);
-        base = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
-        used[j] = true;
-      }
-    }
-    out.push(base);
-  }
-  return out;
+  geminiNormalized?: DiagramModel | null;
 }
 
 /**
- * Flujo principal: preprocesa imagen, corre OCR, detecta shapes, construye diagrama
- * y opcionalmente consulta a Gemini (LLM/visión) para normalizar/interpretar.
+ * Flujo simplificado: confía 100% en Gemini para analizar la imagen
+ * Solo preprocesa la imagen (opcional) y llama a Gemini directamente
  */
-export async function handleImageToDiagram(inputPath: string): Promise<OrchestratorResult> {
+export async function handleImageToDiagram(inputPath: string, options?: { useLLM?: boolean }): Promise<OrchestratorResult> {
+  const useLLM = options?.useLLM !== false; // default true
+  
   if (!fs.existsSync(inputPath)) {
     throw new Error(`Input file not found: ${inputPath}`);
   }
 
-  // 1) Preprocess image (resize/convert)
-  const pre = await preprocessImage(inputPath, { maxWidth: 1600, quality: 70, format: 'jpeg' });
+  // 1) Preprocess image (opcional, para optimizar tamaño)
+  const pre = await preprocessImage(inputPath, { maxWidth: 1600, quality: 85, format: 'jpeg' });
 
-  // 2) OCR
-  const ocrRaw = await runOCR(pre.processedPath);
-
-  // normalize OCR: trim strings and ensure numeric bbox
-  const ocr: OCRText[] = (ocrRaw || []).map(t => {
-    const bbox = t.bbox ? {
-      x: Math.round(t.bbox.x ?? 0),
-      y: Math.round(t.bbox.y ?? 0),
-      w: Math.round(t.bbox.w ?? 0),
-      h: Math.round(t.bbox.h ?? 0),
-    } : undefined;
-    return { text: (t.text ?? '').toString().trim(), bbox };
-  });
-
-  // 3) Vision parser: detectar rects/lines/etc.
-  const shapesRaw = await parseVisionShapes(pre.processedPath);
-
-  // 3a) Normalize shapes: merge overlapping rects and filter tiny boxes
-  const rects = shapesRaw
-    .filter(s => s.type === 'rect' && s.bbox)
-    .map(s => ({ x: Math.round(s.bbox!.x), y: Math.round(s.bbox!.y), w: Math.round(s.bbox!.w), h: Math.round(s.bbox!.h) }))
-    .filter(r => r.w > 20 && r.h > 12); // filter tiny
-
-  const mergedRects = mergeRects(rects, 0.30);
-
-  // Recreate normalized shapes array preserving non-rect shapes (lines)
-  const normalizedShapes: Shape[] = mergedRects.map(r => ({ type: 'rect', bbox: r }));
-  const lines = shapesRaw.filter(s => s.type === 'line' && s.points && s.points.length >= 2);
-  normalizedShapes.push(...lines);
-
-  // 4) Asociar OCR a rects mediante heurística (mejorar matching antes de build)
-  // buildDiagram already associates texts, but we ensure OCR bboxes that fall inside a rect are kept.
-  // If OCR has no bbox, keep as-is.
-  const ocrFiltered = ocr.map(t => {
-    if (!t.bbox) return t;
-    // try to nudge text bbox center if needed
-    const cx = t.bbox.x + t.bbox.w / 2;
-    const cy = t.bbox.y + t.bbox.h / 2;
-    // if center not in any rect, try expanding search radius to include nearby rects
-    const inRect = mergedRects.some(r => cx >= r.x && cx <= r.x + r.w && cy >= r.y && cy <= r.y + r.h);
-    if (inRect) return t;
-    // nudge: if close to any rect center within 0.5 * max(w,h), keep it (so buildDiagram can still match by center)
-    const close = mergedRects.some(r => {
-      const rcx = r.x + r.w / 2;
-      const rcy = r.y + r.h / 2;
-      const d = Math.hypot(rcx - cx, rcy - cy);
-      return d < Math.max(r.w, r.h) * 0.6;
-    });
-    return t; // keep anyway; buildDiagram uses center-in-rect check primarily
-  });
-
-  // 5) Construir diagrama heurístico localmente usando estructuras normalizadas
-  // If no shapes were found, try to parse the OCR text into classes/attributes
-  let diagram: DiagramModel;
-  if (!normalizedShapes.length) {
-    // combine OCR texts and split into lines
-    const fullText = (ocrFiltered || []).map(t => t.text).join('\n\n');
-    const rawLines = fullText.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-
-    const classes: Array<{ id: string; name: string; attributes: string[] }> = [];
-    let current: { id: string; name: string; attributes: string[] } | null = null;
-
-    const isProbableClassTitle = (ln: string) => {
-      // uppercase words with length > 2 or words that look like "CLIENTE", "PRODUCTO", etc.
-      return /^[A-ZÁÉÍÓÚÑ0-9 _-]{3,}$/.test(ln) && !/[-:]/.test(ln);
+  // 2) Si useLLM es false, devolver diagrama vacío (fallback deshabilitado)
+  if (!useLLM) {
+    return {
+      pre,
+      diagram: { classes: [], relations: [] },
+      geminiNormalized: null,
     };
-
-    const attrMatch = (ln: string) => {
-      // "- name: type" or "name: type" or "-name: type"
-      const m = ln.match(/^-?\s*([\wñÑáéíóúÁÉÍÓÚ_]+)\s*:\s*([^\s].*)$/i);
-      if (m) return `${m[1].trim()}: ${m[2].trim()}`;
-      // fallback: line that starts with '-' keep as attribute text
-      if (/^[-•]\s*/.test(ln)) return ln.replace(/^[-•]\s*/, '').trim();
-      return null;
-    };
-
-    for (const ln of rawLines) {
-      // skip obvious header lines
-      if (/class\s+diagrama/i.test(ln)) continue;
-      if (isProbableClassTitle(ln)) {
-        // start new class
-        current = { id: `c_blk_${classes.length + 1}`, name: ln.trim(), attributes: [] };
-        classes.push(current);
-        continue;
-      }
-      const attr = attrMatch(ln);
-      if (attr && current) {
-        current.attributes.push(attr);
-        continue;
-      }
-      // If line looks like a title but not all-caps, treat as small title
-      if (!current && ln.length < 30 && /^[A-Za-z][A-Za-z0-9 _]+$/.test(ln)) {
-        current = { id: `c_blk_${classes.length + 1}`, name: ln.trim(), attributes: [] };
-        classes.push(current);
-        continue;
-      }
-      // otherwise if current exists and line is short, append as attribute
-      if (current && ln.length < 80) {
-        current.attributes.push(ln);
-      }
-    }
-
-    // If nothing parsed as classes, fallback to buildDiagram with shapes (even if empty)
-    if (!classes.length) {
-      diagram = buildDiagram(normalizedShapes, ocrFiltered);
-    } else {
-      diagram = { classes: classes.map(c => ({ id: c.id, name: c.name, attributes: c.attributes })), relations: [] };
-    }
-  } else {
-    diagram = buildDiagram(normalizedShapes, ocrFiltered);
   }
- 
-  // 6) Preparar prompt para LLM/Gemini (si está configurado)
+
+  // 3) Prompt mejorado para Gemini - análisis directo de la imagen
   const prompt = [
-    'Eres un asistente que convierte datos de visión OCR en un diagrama UML JSON.',
-    'Entrada intermedia (shapes + ocr):',
-    JSON.stringify({ shapes: normalizedShapes, ocr: ocrFiltered, diagram }, null, 2),
-    'Devuelve JSON con la estructura: { classes: [{ id,name,attributes }], relations:[{from,to,type}] }'
-  ].join('\n\n');
+    'Eres un experto en análisis de diagramas UML de clases.',
+    'Analiza esta imagen que contiene un diagrama de clases UML y extrae TODA la información.',
+    '',
+    'INSTRUCCIONES DETALLADAS:',
+    '',
+    '1. CLASES:',
+    '   - Identifica TODAS las clases en el diagrama',
+    '   - Para cada clase, extrae:',
+    '     * El nombre completo de la clase',
+    '     * TODOS los atributos (con visibilidad: +, -, #, ~)',
+    '     * TODOS los métodos (con visibilidad y parámetros si están visibles)',
+    '   - Si una clase tiene atributos o métodos, DEBES incluirlos todos',
+    '',
+    '2. RELACIONES:',
+    '   - Identifica TODAS las relaciones entre clases',
+    '   - Tipos de relación:',
+    '     * "inheritance" o "extends" para herencia (flecha con triángulo)',
+    '     * "association" para asociación (línea simple)',
+    '     * "aggregation" para agregación (diamante vacío)',
+    '     * "composition" para composición (diamante lleno)',
+    '     * "dependency" para dependencia (línea punteada)',
+    '   - Incluye la dirección: "from" (origen) y "to" (destino)',
+    '',
+    '3. FORMATO DE RESPUESTA:',
+    '   - Devuelve SOLO un objeto JSON válido',
+    '   - NO incluyas texto adicional, explicaciones ni markdown',
+    '   - El JSON debe tener esta estructura exacta:',
+    '',
+    '{',
+    '  "classes": [',
+    '    {',
+    '      "id": "c1",',
+    '      "name": "NombreClase",',
+    '      "attributes": ["+atributo1: String", "-atributo2: int", "#atributo3: boolean"]',
+    '    }',
+    '  ],',
+    '  "relations": [',
+    '    {',
+    '      "from": "c1",',
+    '      "to": "c2",',
+    '      "type": "inheritance"',
+    '    }',
+    '  ]',
+    '}',
+    '',
+    '4. IMPORTANTE:',
+    '   - Si una clase tiene atributos visibles en la imagen, DEBES incluirlos',
+    '   - Si hay relaciones visibles entre clases, DEBES incluirlas',
+    '   - No inventes información que no esté en la imagen',
+    '   - Sé preciso y completo',
+    '',
+    'Responde SOLO con el JSON, sin texto adicional.'
+  ].join('\n');
 
-  // 7) Llamada a Gemini (puede devolver "normalized" o raw)
-  const gemini = await callGemini({ prompt, imagePath: pre.processedPath, timeoutMs: 45_000 });
+  // 4) Llamada a Gemini con la imagen
+  const gemini = await callGemini({ 
+    prompt, 
+    imagePath: pre.processedPath, 
+    timeoutMs: 60_000 // 60 segundos para análisis completo
+  });
 
-  const gemNormalized = gemini.normalized ?? null;
-  const finalDiagram: DiagramModel = gemNormalized ?? diagram;
+  // 5) Validar y normalizar respuesta de Gemini
+  let gemNormalized: DiagramModel | null = null;
+  let finalDiagram: DiagramModel = { classes: [], relations: [] };
+
+  if (gemini.normalized) {
+    // Validar estructura básica
+    if (gemini.normalized.classes && Array.isArray(gemini.normalized.classes)) {
+      gemNormalized = {
+        classes: gemini.normalized.classes.map((c: any, index: number) => ({
+          id: c.id || `c${index + 1}`,
+          name: c.name || `Class${index + 1}`,
+          attributes: Array.isArray(c.attributes) ? c.attributes : [],
+        })),
+        relations: Array.isArray(gemini.normalized.relations) 
+          ? gemini.normalized.relations.map((r: any) => ({
+              from: r.from || r.fromId,
+              to: r.to || r.toId,
+              type: r.type || 'association',
+            }))
+          : [],
+      };
+      finalDiagram = gemNormalized;
+    }
+  }
+
+  // Si Gemini no devolvió un resultado válido, intentar parsear el texto crudo
+  if (!gemNormalized && gemini.raw?.text) {
+    try {
+      let jsonText = gemini.raw.text.trim();
+      // Remover markdown code blocks si existen
+      const jsonMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+      if (jsonMatch) {
+        jsonText = jsonMatch[1].trim();
+      }
+      const parsed = JSON.parse(jsonText);
+      if (parsed.classes && Array.isArray(parsed.classes)) {
+        gemNormalized = {
+          classes: parsed.classes.map((c: any, index: number) => ({
+            id: c.id || `c${index + 1}`,
+            name: c.name || `Class${index + 1}`,
+            attributes: Array.isArray(c.attributes) ? c.attributes : [],
+          })),
+          relations: Array.isArray(parsed.relations) ? parsed.relations : [],
+        };
+        finalDiagram = gemNormalized;
+      }
+    } catch (parseErr) {
+      console.warn('No se pudo parsear la respuesta de Gemini:', parseErr);
+    }
+  }
 
   return {
     pre,
-    ocr: ocrFiltered,
-    shapes: normalizedShapes,
     diagram: finalDiagram,
     geminiRaw: gemini.raw,
     geminiNormalized: gemNormalized,
   };
+}
+
+/**
+ * Versión que acepta buffer de imagen directamente (como el código del amigo)
+ */
+export async function handleImageBufferToDiagram(
+  imageBuffer: Buffer,
+  options: {
+    language?: string;
+    useLLM?: boolean;
+    mimeType?: string;
+    originalName?: string;
+  } = {}
+): Promise<OrchestratorResult> {
+  // Guardar buffer temporalmente en un archivo
+  const tmpDir = path.join(process.cwd(), 'tmp', 'uploads');
+  fs.mkdirSync(tmpDir, { recursive: true });
+  
+  // Determinar extensión del archivo basado en mimeType o usar .jpg por defecto
+  let ext = 'jpg';
+  if (options.mimeType) {
+    if (options.mimeType.includes('png')) ext = 'png';
+    else if (options.mimeType.includes('jpeg') || options.mimeType.includes('jpg')) ext = 'jpg';
+    else if (options.mimeType.includes('webp')) ext = 'webp';
+  }
+  
+  const tempFileName = `${uuidv4()}.${ext}`;
+  const tempFilePath = path.join(tmpDir, tempFileName);
+  
+  try {
+    // Escribir buffer a archivo temporal
+    await fs.promises.writeFile(tempFilePath, imageBuffer);
+    
+    // Procesar con la función existente, pasando useLLM como opción
+    const result = await handleImageToDiagram(tempFilePath, { useLLM: options.useLLM });
+    
+    return result;
+  } finally {
+    // Limpiar archivo temporal después de procesar
+    fs.promises.unlink(tempFilePath).catch(() => {
+      // Ignorar errores al eliminar archivo temporal
+    });
+    
+    // También limpiar archivo procesado si existe
+    const processedPath = tempFilePath.replace(`.${ext}`, `-processed.jpg`);
+    fs.promises.unlink(processedPath).catch(() => {
+      // Ignorar errores al eliminar archivo procesado
+    });
+  }
 }

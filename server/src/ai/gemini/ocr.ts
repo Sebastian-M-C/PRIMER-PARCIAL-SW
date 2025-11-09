@@ -158,8 +158,17 @@ export async function runOCR(imagePath: string): Promise<OCRText[]> {
       }
 
       return [];
-    } catch (err) {
-      console.warn('Google Vision OCR failed, falling back:', (err as Error)?.toString?.() ?? err);
+    } catch (err: any) {
+      // Error 403: API no habilitada o sin permisos - esto es normal si no tienes Google Vision API habilitada
+      // Error 400: API key inválida o mal formada
+      const statusCode = err?.response?.status;
+      if (statusCode === 403) {
+        console.log('Google Vision API no disponible (403). Usando fallback OCR...');
+      } else if (statusCode === 400) {
+        console.warn('Google Vision API key inválida. Usando fallback OCR...');
+      } else {
+        console.warn('Google Vision OCR falló, usando fallback:', err?.message || String(err));
+      }
       // continue to tesseract fallback
     }
   }
