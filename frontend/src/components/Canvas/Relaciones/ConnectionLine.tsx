@@ -54,6 +54,7 @@ export const ConnectionLine: React.FC<ConnectionLineProps> = ({
   onClick,
   onContextMenu
 }) => {
+  const isSpecial = relation.type === 'INHERITANCE' || relation.type === 'COMPOSITION' || relation.type === 'AGGREGATION';
   /**
    * Devuelve estilo (color, grosor, dash) según el tipo de relación.
    * isSelected incrementa el strokeWidth para mayor énfasis.
@@ -116,6 +117,21 @@ export const ConnectionLine: React.FC<ConnectionLineProps> = ({
     sourceCenterX, sourceCenterY
   );
 
+  // Compute direction and an adjusted end to improve visual distance for special adornments
+  const dx = endPoint.x - startPoint.x;
+  const dy = endPoint.y - startPoint.y;
+  const len = Math.sqrt(dx*dx + dy*dy) || 1;
+  const ux = dx / len;
+  const uy = dy / len;
+  // Pull the end slightly back from the target node so markers don't overlap borders
+  const markerBack = isSpecial ? 14 : 0; // px
+  const adjustedEnd = {
+    x: endPoint.x - ux * markerBack,
+    y: endPoint.y - uy * markerBack
+  };
+  const angleRad = Math.atan2(dy, dx);
+  const angleDeg = (angleRad * 180) / Math.PI;
+
   // Punto medio (para etiqueta de relación)
   const midX = (startPoint.x + endPoint.x) / 2;
   const midY = (startPoint.y + endPoint.y) / 2;
@@ -147,7 +163,7 @@ export const ConnectionLine: React.FC<ConnectionLineProps> = ({
     <Group onClick={onClick} onContextMenu={handleContextMenu}>
       {/* Línea principal entre los puntos calculados */}
       <Line
-        points={[startPoint.x, startPoint.y, endPoint.x, endPoint.y]}
+        points={[startPoint.x, startPoint.y, adjustedEnd.x, adjustedEnd.y]}
         stroke={style.stroke}
         strokeWidth={style.strokeWidth}
         dash={style.dash}
@@ -157,37 +173,32 @@ export const ConnectionLine: React.FC<ConnectionLineProps> = ({
 
       {/* Flecha para herencia (triángulo apuntando al extremo) */}
       {relation.type === 'INHERITANCE' && (
-        <Line
-          points={[
-            endPoint.x - 12, endPoint.y - 6,
-            endPoint.x, endPoint.y,
-            endPoint.x - 12, endPoint.y + 6
-          ]}
-          stroke={style.stroke}
-          strokeWidth={style.strokeWidth}
-          closed
-          fill={style.stroke}
-        />
+        <Group x={adjustedEnd.x} y={adjustedEnd.y} rotation={angleDeg}>
+          <Line
+            points={[-12, -6, 0, 0, -12, 6]}
+            stroke={style.stroke}
+            strokeWidth={style.strokeWidth}
+            closed
+            fill={style.stroke}
+          />
+        </Group>
       )}
 
       {/* Rombos para composition / aggregation (relleno para composition) */}
       {(relation.type === 'COMPOSITION' || relation.type === 'AGGREGATION') && (
-        <Line
-          points={[
-            endPoint.x - 10, endPoint.y,
-            endPoint.x, endPoint.y - 10,
-            endPoint.x + 10, endPoint.y,
-            endPoint.x, endPoint.y + 10
-          ]}
-          stroke={style.stroke}
-          strokeWidth={style.strokeWidth}
-          closed
-          fill={relation.type === 'COMPOSITION' ? style.stroke : 'transparent'}
-        />
+        <Group x={adjustedEnd.x} y={adjustedEnd.y} rotation={angleDeg}>
+          <Line
+            points={[-10, 0, 0, -10, 10, 0, 0, 10]}
+            stroke={style.stroke}
+            strokeWidth={style.strokeWidth}
+            closed
+            fill={relation.type === 'COMPOSITION' ? style.stroke : 'transparent'}
+          />
+        </Group>
       )}
 
       {/* Cardinalidad en el extremo fuente */}
-      {relation.sourceCardinality && (
+      {!isSpecial && relation.sourceCardinality && (
         <Group>
           <Circle
             x={sourceLabelX}
@@ -211,7 +222,7 @@ export const ConnectionLine: React.FC<ConnectionLineProps> = ({
       )}
 
       {/* Cardinalidad en el extremo destino */}
-      {relation.targetCardinality && (
+      {!isSpecial && relation.targetCardinality && (
         <Group>
           <Circle
             x={targetLabelX}

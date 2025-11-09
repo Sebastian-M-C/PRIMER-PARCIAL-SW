@@ -1,7 +1,7 @@
 import React, { memo } from 'react';
 import { Stage, Layer, Group, Line, Circle } from 'react-konva';
 import Konva from 'konva';
-import { UMLClass, UMLRelation, Diagram } from '../../../types/uml';
+import { UMLClass, Diagram } from '../../../types/uml';
 import { ClassNode } from '../Clase/ClassNode';
 import { ConnectionLine } from '../../Canvas/Relaciones/ConnectionLine';
 import { ManyToManyVisual } from '../Relaciones/ManyToManyVisual';
@@ -36,6 +36,8 @@ export interface CanvasStageProps {
   onRelationContextMenu?: (clientX: number, clientY: number, relationId: string) => void;
   // nuevo: handler para click sobre una relación (seleccionar/editar)
   onRelationClick?: (relationId: string) => void;
+  // nuevo: desactivar drag de nodos cuando un modal está abierto
+  disableNodesDragging?: boolean;
 }
 
 export const CanvasStage: React.FC<CanvasStageProps> = memo(({
@@ -131,8 +133,10 @@ export const CanvasStage: React.FC<CanvasStageProps> = memo(({
           if (!diagram) return null;
 
           // Agrupar relaciones por target (posible clase "join")
+          // Solo consideramos ONE_TO_MANY para agrupar como MANY_TO_MANY visual, evitando confundir INHERITANCE/otros
           const relationsByTarget = new Map<string, typeof diagram.relations>();
           diagram.relations.forEach(r => {
+            if (r.type !== 'ONE_TO_MANY') return;
             const arr = relationsByTarget.get(r.target) || [];
             arr.push(r);
             relationsByTarget.set(r.target, arr);
@@ -148,7 +152,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = memo(({
           relationsByTarget.forEach((rels, targetId) => {
             if (rels.length === 2) {
               const [r1, r2] = rels;
-              if (r1.source !== r2.source) {
+              if (r1.source !== r2.source && r1.type === 'ONE_TO_MANY' && r2.type === 'ONE_TO_MANY') {
                 manyToManyJoinGroups.push({ joinId: targetId, relA: r1, relB: r2 });
               }
             }

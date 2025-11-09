@@ -8,11 +8,13 @@
  * Representa un atributo de una clase UML.
  * - name: nombre del atributo
  * - type: tipo de dato (String, Long, etc.)
+ * - visibility: modificador de visibilidad UML (+, -, #, ~)
  * - nullable, unique, isId: metainformación opcional
  */
 export interface UMLAttribute {
   name: string;
   type: string;
+  visibility?: 'public' | 'private' | 'protected' | 'package';
   nullable?: boolean;
   unique?: boolean;
   isId?: boolean;
@@ -22,11 +24,13 @@ export interface UMLAttribute {
  * Representa un método/operación de una clase UML.
  * - name: nombre del método
  * - returnType: tipo de retorno
+ * - visibility: modificador de visibilidad UML (+, -, #, ~)
  * - parameters: lista de parámetros { name, type }
  */
 export interface UMLMethod {
   name: string;
   returnType: string;
+  visibility?: 'public' | 'private' | 'protected' | 'package';
   parameters: Array<{
     name: string;
     type: string;
