@@ -2,6 +2,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import archiver from 'archiver';
 import { UMLDiagramJSON } from '../types/uml';
+// Usar ruta relativa en lugar del alias '@/generator/...' para que ts-node/nodemon
+// resuelva correctamente durante la ejecución en desarrollo.
+import { generatePostmanCollection } from './postmanGenerator';
 
 
 /**
@@ -84,6 +87,28 @@ function toJavaClassName(name: string): string {
  */
 function toSafeName(name: string): string {
   return toJavaClassName(name).toLowerCase();
+}
+
+/**
+ * Convierte un nombre de clase a lowerCamelCase para nombres de variables.
+ * OrderItem -> orderItem
+ */
+function toLowerCamel(name: string): string {
+  const cls = toJavaClassName(name);
+  return cls.charAt(0).toLowerCase() + cls.slice(1);
+}
+
+/**
+ * Pluralización muy simple para colecciones: agrega 's' por defecto.
+ * No pretende cubrir todos los casos de inglés.
+ */
+function simplePlural(name: string): string {
+  if (!name) return name;
+  // casos mínimos: company -> companies
+  if (/[^aeiou]y$/i.test(name)) return name.replace(/y$/i, 'ies');
+  // class -> classes
+  if (/s$/i.test(name)) return name + 'es';
+  return name + 's';
 }
 
 /**
@@ -325,10 +350,19 @@ spring.jackson.time-zone=UTC`;
  */
 async function generateEntities(projectDir: string, basePackage: string, classes: any[]): Promise<void> {
   const packagePath = path.join(projectDir, 'src', 'main', 'java', basePackage.replace(/\./g, '/'), 'entity');
+  // Determinar clases que actúan como superclases (targets de INHERITANCE)
+  const inheritanceTargets = new Set<string>();
+  for (const c of classes) {
+    for (const rel of c.relations || []) {
+      if (rel.type === 'INHERITANCE' && rel.target) {
+        inheritanceTargets.add(toJavaClassName(rel.target));
+      }
+    }
+  }
 
   for (const cls of classes) {
     const className = toJavaClassName(cls.name);
-    const entityContent = generateEntityClass(basePackage, cls, className);
+    const entityContent = generateEntityClass(basePackage, cls, className, inheritanceTargets);
     await fs.promises.writeFile(
       path.join(packagePath, `${className}.java`),
       entityContent
@@ -341,10 +375,21 @@ async function generateEntities(projectDir: string, basePackage: string, classes
  * - cls: objeto con nombre, atributos y relaciones.
  * - Retorna: string con el código Java de la entidad.
  */
-function generateEntityClass(basePackage: string, cls: any, classNameOverride?: string): string {
+function generateEntityClass(basePackage: string, cls: any, classNameOverride?: string, inheritanceTargets?: Set<string>): string {
   const className = classNameOverride || toJavaClassName(cls.name);
-  const hasId = cls.attributes?.some((attr: any) => attr.isId);
-  const idAttribute = cls.attributes?.find((attr: any) => attr.isId);
+  // Detectar atributo id aunque no tenga la marca isId;
+  // esto evita duplicar campo cuando el usuario define 'id' pero olvida poner isId.
+  const idAttribute = cls.attributes?.find((attr: any) => attr.isId || attr.name?.toLowerCase() === 'id');
+  const hasId = !!idAttribute;
+  // Detectar relación(es) de herencia (INHERITANCE) para extender la clase padre
+  const inheritanceRels = (cls.relations || []).filter((r: any) => r.type === 'INHERITANCE');
+  let parentClass: string | null = null;
+  if (inheritanceRels.length > 0) {
+    parentClass = toJavaClassName(inheritanceRels[0].target);
+    if (inheritanceRels.length > 1) {
+      console.warn(`Multiple INHERITANCE relations for ${className}. Using first: ${parentClass}`);
+    }
+  }
 
   const imports = collectImportsForAttributes(cls.attributes);
   // Always need List/ArrayList for relations
@@ -376,13 +421,14 @@ import org.hibernate.annotations.UpdateTimestamp;
 
 @Entity
 @Table(name = "${toSafeName(className)}s")
+${inheritanceTargets?.has(className) ? '@Inheritance(strategy = InheritanceType.JOINED)' : ''}
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class ${className} {`;
+public class ${className}${parentClass ? ' extends ' + parentClass : ''} {`;
 
-  // Add ID field if not present
+  // Add ID field if not present at all
   if (!hasId) {
     content += `
 
@@ -396,7 +442,8 @@ public class ${className} {`;
     content += `\n\n    `;
 
     // Add JPA annotations
-    if (attr.isId) {
+    if (attr.isId || attr.name?.toLowerCase() === 'id') {
+      // Si el atributo ya existe y representa el id, agregar anotaciones una sola vez.
       content += `@Id\n    @GeneratedValue(strategy = GenerationType.IDENTITY)\n    `;
     }
 
@@ -434,9 +481,20 @@ public class ${className} {`;
     private LocalDateTime updatedAt;`;
   }
 
-  // Add relationships
+  // Add relationships (omitir INHERITANCE aquí porque ya se maneja con 'extends')
+  const helperMethods: string[] = [];
   for (const relation of cls.relations || []) {
-    content += generateRelationshipAnnotation(relation);
+    if (relation.type === 'INHERITANCE') continue;
+    const rel = generateRelationshipAnnotation(relation, className);
+    content += rel.code;
+    if (rel.helper) helperMethods.push(rel.helper);
+  }
+
+  if (helperMethods.length) {
+    content += `\n\n    // Helpers para manejar colecciones hijas`;
+    for (const h of helperMethods) {
+      content += `\n${h}`;
+    }
   }
 
   content += `\n}`;
@@ -449,12 +507,27 @@ public class ${className} {`;
  * - Retorna: snippet de código Java para insertar en la entidad.
  */
 
-function generateRelationshipAnnotation(relation: any): string {
+function generateRelationshipAnnotation(relation: any, ownerClassName?: string): { code: string; helper?: string } {
   let content = `\n\n    `;
+  let helper: string | undefined;
   const targetClass = toJavaClassName(relation.target || 'Related');
-  const targetVar = toSafeName(targetClass);
+  // nombre de variable en lowerCamelCase
+  const targetVar = toLowerCamel(targetClass);
   const sourceClass = relation.source ? toJavaClassName(relation.source) : undefined;
   const sourceVar = sourceClass ? toSafeName(sourceClass) : undefined;
+
+  // Si hay cardinalidades, ajustar el tipo de relación automáticamente
+  const srcCard = (relation.sourceCardinality || '').trim();
+  const tgtCard = (relation.targetCardinality || '').trim();
+  const isMany = (c: string) => c === '*' || c === '0..*' || c === '1..*' || /\bmany\b/i.test(c);
+  const isOne = (c: string) => c === '1' || c === '0..1';
+  // No sobrescribir cuando el tipo explícito es COMPOSITION o AGGREGATION
+  if (srcCard && tgtCard && relation.type !== 'COMPOSITION' && relation.type !== 'AGGREGATION') {
+    if (isOne(srcCard) && isOne(tgtCard)) relation.type = 'ONE_TO_ONE';
+    else if (isMany(srcCard) && isMany(tgtCard)) relation.type = 'MANY_TO_MANY';
+    else if (isMany(srcCard) && isOne(tgtCard)) relation.type = ownerClassName === sourceClass ? 'MANY_TO_ONE' : 'ONE_TO_MANY';
+    else if (isOne(srcCard) && isMany(tgtCard)) relation.type = ownerClassName === sourceClass ? 'ONE_TO_MANY' : 'MANY_TO_ONE';
+  }
 
   switch (relation.type) {
     case 'ONE_TO_ONE':
@@ -472,7 +545,7 @@ function generateRelationshipAnnotation(relation: any): string {
       } else {
         content += `@OneToMany(cascade = CascadeType.ALL, fetch = FetchType.LAZY)\n    `;
       }
-      content += `private List<${targetClass}> ${targetVar}s = new ArrayList<>();`;
+      content += `private List<${targetClass}> ${simplePlural(targetVar)} = new ArrayList<>();`;
       break;
     }
 
@@ -481,22 +554,44 @@ function generateRelationshipAnnotation(relation: any): string {
       if (relation.joinColumn) {
         content += `@JoinColumn(name = "${relation.joinColumn}")`;
       } else {
+        // joinColumn por convención: target entity id
         content += `@JoinColumn(name = "${targetVar}_id")`;
       }
       content += `\n    private ${targetClass} ${targetVar};`;
       break;
 
     case 'MANY_TO_MANY': {
-      const joinTable = sourceVar ? `${sourceVar}_${targetVar}` : `${targetVar}_${targetVar}`;
-      const joinColumn = sourceVar ? `${sourceVar}_id` : 'id';
-      content += `@ManyToMany(cascade = CascadeType.ALL, fetch = FetchType.LAZY)\n    `;
-      content += `@JoinTable(\n        name = "${joinTable}",\n        joinColumns = @JoinColumn(name = "${joinColumn}"),\n        inverseJoinColumns = @JoinColumn(name = "${targetVar}_id")\n    )\n    `;
-      content += `private List<${targetClass}> ${targetVar}s = new ArrayList<>();`;
+      // Si viene mappedBy, este lado es inverso (sin JoinTable)
+      if (relation.mappedBy) {
+        content += `@ManyToMany(mappedBy = "${relation.mappedBy}", fetch = FetchType.LAZY)\n    `;
+        content += `private List<${targetClass}> ${simplePlural(targetVar)} = new ArrayList<>();`;
+      } else {
+        const owner = ownerClassName ? toSafeName(ownerClassName) : (sourceVar || 'owner');
+        const joinTable = `${owner}_${targetVar}`;
+        const joinColumn = `${owner}_id`;
+        content += `@ManyToMany(cascade = CascadeType.ALL, fetch = FetchType.LAZY)\n    `;
+        content += `@JoinTable(\n        name = "${joinTable}",\n        joinColumns = @JoinColumn(name = "${joinColumn}"),\n        inverseJoinColumns = @JoinColumn(name = "${targetVar}_id")\n    )\n    `;
+        content += `private List<${targetClass}> ${simplePlural(targetVar)} = new ArrayList<>();`;
+      }
+      break;
+    }
+    case 'COMPOSITION': {
+      // Composición: fuerte, con orphanRemoval y helper
+      const mapped = relation.mappedBy ? `(mappedBy = "${relation.mappedBy}", cascade = CascadeType.ALL, orphanRemoval = true)` : `(cascade = CascadeType.ALL, orphanRemoval = true)`;
+      content += `@OneToMany${mapped}\n    private List<${targetClass}> ${simplePlural(targetVar)} = new ArrayList<>();`;
+      helper = `    public void add${targetClass}(${targetClass} child) {\n        this.${simplePlural(targetVar)}.add(child);\n    }`;
+      break;
+    }
+    case 'AGGREGATION': {
+      // Agregación: débil, sin orphanRemoval y helper
+      const mapped = relation.mappedBy ? `(mappedBy = "${relation.mappedBy}", cascade = CascadeType.PERSIST)` : `(cascade = CascadeType.PERSIST)`;
+      content += `@OneToMany${mapped}\n    private List<${targetClass}> ${simplePlural(targetVar)} = new ArrayList<>();`;
+      helper = `    public void add${targetClass}(${targetClass} child) {\n        this.${simplePlural(targetVar)}.add(child);\n    }`;
       break;
     }
   }
 
-  return content;
+  return { code: content, helper };
 }
 /**
  * Genera DTOs (Request/Response) para cada clase UML.
@@ -620,9 +715,12 @@ function generateResponseDTO(basePackage: string, cls: any): string {
   const dtoFields = (cls.attributes || []);
   const hasFields = dtoFields.length > 0;
 
-  const lombokAnnotations = ['@Data', '@NoArgsConstructor'];
+  // Siempre agregamos @Builder, aunque no haya campos, porque el ServiceImpl
+  // usa `${className}Response.builder()` incluso cuando la clase no tiene atributos.
+  // (@AllArgsConstructor sigue siendo opcional y solo se agrega cuando hay campos).
+  const lombokAnnotations = ['@Data', '@NoArgsConstructor', '@Builder'];
   if (hasFields) {
-    lombokAnnotations.push('@AllArgsConstructor', '@Builder');
+    lombokAnnotations.push('@AllArgsConstructor');
   }
 
   content += `import lombok.*;\n\n${lombokAnnotations.join('\n')}\npublic class ${className}Response {`;
@@ -865,172 +963,6 @@ public class ${className}Controller {
   }
 }
 
-/**
- * Genera una colección Postman (JSON) con endpoints CRUD para cada entidad.
- * - projectDir: ruta del proyecto.
- * - projectName: nombre del proyecto/colección.
- * - classes: definiciones UML.
- */
-
-
-async function generatePostmanCollection(projectDir: string, projectName: string, classes: any[]): Promise<void> {
-  const collection: any = {
-    info: {
-      name: `${projectName} API`,
-      description: `Generated API collection for ${projectName}`,
-      schema: "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-    },
-    item: []
-  };
-
-  for (const cls of classes) {
-    const baseUrl = "{{baseUrl}}/api";
-    const className = toSafeName(toJavaClassName(cls.name));
-
-    // Create folder for each entity
-    const folder = {
-      name: cls.name,
-      item: [
-        {
-          name: `Create ${cls.name}`,
-          request: {
-            method: "POST",
-            header: [
-              {
-                key: "Content-Type",
-                value: "application/json"
-              }
-            ],
-            body: {
-              mode: "raw",
-              raw: generateSampleJson(cls, false)
-            },
-            url: {
-              raw: `${baseUrl}/${className}s`,
-              host: ["{{baseUrl}}"],
-              path: ["api", `${className}s`]
-            }
-          }
-        },
-        {
-          name: `Get All ${cls.name}s`,
-          request: {
-            method: "GET",
-            url: {
-              raw: `${baseUrl}/${className}s`,
-              host: ["{{baseUrl}}"],
-              path: ["api", `${className}s`]
-            }
-          }
-        },
-        {
-          name: `Get ${cls.name} by ID`,
-          request: {
-            method: "GET",
-            url: {
-              raw: `${baseUrl}/${className}s/1`,
-              host: ["{{baseUrl}}"],
-              path: ["api", `${className}s`, "1"]
-            }
-          }
-        },
-        {
-          name: `Update ${cls.name}`,
-          request: {
-            method: "PUT",
-            header: [
-              {
-                key: "Content-Type",
-                value: "application/json"
-              }
-            ],
-            body: {
-              mode: "raw",
-              raw: generateSampleJson(cls, false)
-            },
-            url: {
-              raw: `${baseUrl}/${className}s/1`,
-              host: ["{{baseUrl}}"],
-              path: ["api", `${className}s`, "1"]
-            }
-          }
-        },
-        {
-          name: `Delete ${cls.name}`,
-          request: {
-            method: "DELETE",
-            url: {
-              raw: `${baseUrl}/${className}s/1`,
-              host: ["{{baseUrl}}"],
-              path: ["api", `${className}s`, "1"]
-            }
-          }
-        }
-      ]
-    };
-
-    collection.item.push(folder);
-  }
-
-  // Add variables
-  collection.item.push({
-    name: "Variables",
-    item: [
-      {
-        name: "Set Base URL",
-        request: {
-          method: "GET",
-          url: {
-            raw: "{{baseUrl}}/health",
-            host: ["{{baseUrl}}"],
-            path: ["health"]
-          }
-        }
-      }
-    ]
-  });
-
-  await fs.promises.writeFile(
-    path.join(projectDir, 'docs', `${projectName}-postman-collection.json`),
-    JSON.stringify(collection, null, 2)
-  );
-}
-/**
- * Genera un JSON de ejemplo para un DTO a partir de la definición de atributos.
- * - cls: definición UML de la clase.
- * - includeId: si incluye el campo ID en el ejemplo.
- * - Retorna: string con JSON formateado.
- */
-function generateSampleJson(cls: any, includeId: boolean = true): string {
-  const sample: any = {};
-
-  for (const attr of cls.attributes || []) {
-    if (attr.isId && !includeId) continue;
-
-    switch (attr.type) {
-      case 'String':
-        sample[attr.name] = `Sample ${attr.name}`;
-        break;
-      case 'Long':
-      case 'Integer':
-        sample[attr.name] = 1;
-        break;
-      case 'Boolean':
-        sample[attr.name] = true;
-        break;
-      case 'LocalDateTime':
-        sample[attr.name] = "2023-12-01T10:00:00";
-        break;
-      case 'BigDecimal':
-        sample[attr.name] = 99.99;
-        break;
-      default:
-        sample[attr.name] = `Sample ${attr.name}`;
-    }
-  }
-
-  return JSON.stringify(sample, null, 2);
-}
 /**
  * Mapea tipos del UML a tipos Java conocidos.
  * - type: cadena con el tipo UML.

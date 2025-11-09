@@ -42,7 +42,7 @@ export async function callGemini(opts: { prompt: string; imagePath?: string; tim
     // Endpoint oficial de Gemini API
     // Usar v1beta con modelos compatibles: gemini-pro-vision o gemini-1.5-pro-latest
     // Modelos disponibles en v1beta: gemini-pro, gemini-pro-vision, gemini-1.5-pro-latest, gemini-1.5-flash-latest
-    const modelName = process.env.GEMINI_MODEL || 'gemini-1.5-pro-latest';
+    const modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
     const apiVersion = process.env.GEMINI_API_VERSION || 'v1beta';
     
     // Validar modelo

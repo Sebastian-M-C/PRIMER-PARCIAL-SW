@@ -132,3 +132,8 @@ docker-compose.override.yml
 *.jar
 target/
 
+# Archivos generados por pruebas de humo
+/server/out-smoke-unzipped/
+/server/out-smoke.zip
+/out-smoke.zip
+
