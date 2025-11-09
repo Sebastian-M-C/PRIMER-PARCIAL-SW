@@ -424,12 +424,28 @@ export function useDiagramActions() {
     });
 
     // Eliminar duplicados por ID (por si acaso)
-    const uniqueClasses = Array.from(
+    let uniqueClasses = Array.from(
       new Map(convertedClasses.map(cls => [cls.id, cls])).values()
     );
 
+    // Función auxiliar para detectar si una clase es una clase intermedia (join class)
+    const isJoinClass = (className: string, sourceName: string, targetName: string): boolean => {
+      const normalizedName = className.toLowerCase().replace(/[_\s]/g, '');
+      const normalizedSource = sourceName.toLowerCase();
+      const normalizedTarget = targetName.toLowerCase();
+      
+      // Patrones comunes para nombres de clases intermedias
+      return normalizedName.includes(normalizedSource) && normalizedName.includes(normalizedTarget) ||
+             normalizedName.includes('join') ||
+             normalizedName.includes('detalle') ||
+             normalizedName.includes('detail');
+    };
+
     // Convertir relaciones del backend
-    const convertedRelations: UMLRelation[] = (backendDiagram.relations || []).map((rel: any, index: number) => {
+    const convertedRelations: UMLRelation[] = [];
+    const manyToManyRelations: Array<{ rel: any; sourceId: string; targetId: string; sourceName: string; targetName: string }> = [];
+    
+    (backendDiagram.relations || []).forEach((rel: any, index: number) => {
       // Resolver source y target (pueden ser nombres o IDs)
       const sourceKey = rel.source || rel.sourceClassName || rel.sourceName;
       const targetKey = rel.target || rel.targetClassName || rel.targetName;
@@ -440,7 +456,7 @@ export function useDiagramActions() {
       // Validar que ambos IDs existan
       if (!idToClassMap.has(sourceId) || !idToClassMap.has(targetId)) {
         console.warn(`Relación inválida: source=${sourceKey} (${sourceId}), target=${targetKey} (${targetId})`);
-        return null;
+        return;
       }
 
       // Normalizar tipo de relación
@@ -448,6 +464,22 @@ export function useDiagramActions() {
       let relationType = (rel.type || 'ONE_TO_MANY').toUpperCase();
       if (!validTypes.includes(relationType)) {
         relationType = 'ONE_TO_MANY';
+      }
+
+      // Si es MANY_TO_MANY, guardarla para procesarla después
+      if (relationType === 'MANY_TO_MANY') {
+        const sourceClass = idToClassMap.get(sourceId);
+        const targetClass = idToClassMap.get(targetId);
+        if (sourceClass && targetClass) {
+          manyToManyRelations.push({
+            rel,
+            sourceId,
+            targetId,
+            sourceName: sourceClass.name,
+            targetName: targetClass.name
+          });
+        }
+        return; // No agregar la relación MANY_TO_MANY directa
       }
 
       // Determinar cardinalidades: usar las proporcionadas o valores por defecto según el tipo
@@ -473,10 +505,6 @@ export function useDiagramActions() {
             sourceCardinality = '*';
             targetCardinality = '1';
             break;
-          case 'MANY_TO_MANY':
-            sourceCardinality = '*';
-            targetCardinality = '*';
-            break;
           case 'INHERITANCE':
           case 'COMPOSITION':
           case 'AGGREGATION':
@@ -490,7 +518,7 @@ export function useDiagramActions() {
         }
       }
 
-      return {
+      convertedRelations.push({
         id: rel.id || `ai-relation-${Date.now()}-${index}`,
         type: relationType as UMLRelation['type'],
         source: sourceId,
@@ -500,8 +528,110 @@ export function useDiagramActions() {
         mappedBy: rel.mappedBy || undefined,
         joinColumn: rel.joinColumn || undefined,
         label: rel.label || rel.sourceLabel || rel.targetLabel || undefined
-      } as UMLRelation;
-    }).filter((rel: UMLRelation | null): rel is UMLRelation => rel !== null);
+      } as UMLRelation);
+    });
+
+    // Procesar relaciones MANY_TO_MANY: buscar clase intermedia y crear dos relaciones ONE_TO_MANY
+    manyToManyRelations.forEach((m2m, index) => {
+      // Buscar clase intermedia por nombre o metadata
+      let joinClass: UMLClass | null = null;
+      
+      // Buscar por metadata primero
+      for (const cls of uniqueClasses) {
+        const meta = (cls as any).metadata;
+        if (meta && Array.isArray(meta.generatedJoinFor)) {
+          const joinFor = meta.generatedJoinFor.map((id: string) => 
+            idToClassMap.get(id)?.name || nameToIdMap.get(id) || id
+          );
+          if (joinFor.includes(m2m.sourceName) && joinFor.includes(m2m.targetName)) {
+            joinClass = cls;
+            break;
+          }
+        }
+      }
+      
+      // Si no se encontró por metadata, buscar por nombre
+      if (!joinClass) {
+        joinClass = uniqueClasses.find(cls => 
+          isJoinClass(cls.name, m2m.sourceName, m2m.targetName)
+        ) || null;
+      }
+      
+      // Si no existe clase intermedia, crearla
+      if (!joinClass) {
+        const joinName = `${m2m.sourceName}_${m2m.targetName}_DETALLE`;
+        const sourceClass = idToClassMap.get(m2m.sourceId);
+        const targetClass = idToClassMap.get(m2m.targetId);
+        
+        if (sourceClass && targetClass) {
+          const joinId = `join-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`;
+          const joinPosition = {
+            x: Math.round((sourceClass.position.x + targetClass.position.x) / 2),
+            y: Math.round((sourceClass.position.y + targetClass.position.y) / 2) - 100
+          };
+          
+          joinClass = {
+            id: joinId,
+            name: joinName,
+            attributes: [],
+            methods: [],
+            position: joinPosition,
+            width: 200,
+            height: 100
+          } as UMLClass;
+          
+          // Agregar metadata para identificar como join class
+          (joinClass as any).metadata = {
+            generatedJoinFor: [m2m.sourceId, m2m.targetId],
+            hiddenInCanvas: false
+          };
+          
+          uniqueClasses.push(joinClass);
+          nameToIdMap.set(joinClass.name, joinClass.id);
+          idToClassMap.set(joinClass.id, joinClass);
+        }
+      } else {
+        // Asegurar que la clase intermedia tenga metadata
+        if (!(joinClass as any).metadata) {
+          (joinClass as any).metadata = {
+            generatedJoinFor: [m2m.sourceId, m2m.targetId],
+            hiddenInCanvas: false
+          };
+        }
+      }
+      
+      // Crear dos relaciones ONE_TO_MANY desde las clases principales hacia la clase intermedia
+      if (joinClass) {
+        const sourceCardinality = m2m.rel.sourceCardinality || '1';
+        const targetCardinality = m2m.rel.targetCardinality || '*';
+        
+        // Relación 1: source -> join class
+        convertedRelations.push({
+          id: m2m.rel.id ? `${m2m.rel.id}_source` : `ai-relation-${Date.now()}-${index}-source`,
+          type: 'ONE_TO_MANY' as const,
+          source: m2m.sourceId,
+          target: joinClass.id,
+          sourceCardinality: sourceCardinality,
+          targetCardinality: '1..*',
+          mappedBy: m2m.rel.mappedBy || undefined,
+          joinColumn: m2m.rel.joinColumn || undefined,
+          label: m2m.rel.label || m2m.rel.sourceLabel || undefined
+        } as UMLRelation);
+        
+        // Relación 2: target -> join class
+        convertedRelations.push({
+          id: m2m.rel.id ? `${m2m.rel.id}_target` : `ai-relation-${Date.now()}-${index}-target`,
+          type: 'ONE_TO_MANY' as const,
+          source: m2m.targetId,
+          target: joinClass.id,
+          sourceCardinality: targetCardinality,
+          targetCardinality: '1..*',
+          mappedBy: undefined,
+          joinColumn: undefined,
+          label: undefined
+        } as UMLRelation);
+      }
+    });
 
     // Crear diagrama convertido con clases únicas
     return {
