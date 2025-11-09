@@ -97,9 +97,14 @@ router.post('/modify-diagram', async (req, res): Promise<void> => {
       return;
     }
 
-    // 1) Pedir acciones al AI
-    const actionResponse = await modifyDiagramFromText(diagram, text);
-    const actions = actionResponse.actions || [];
+    // 1) Si el cliente envía 'actions' explícitas, úsalas. Si no, pide acciones a la IA.
+    let actions: any[] = [];
+    if (Array.isArray(req.body.actions) && req.body.actions.length > 0) {
+      actions = req.body.actions;
+    } else {
+      const actionResponse = await modifyDiagramFromText(diagram, text);
+      actions = actionResponse.actions || [];
+    }
 
     // 2) Validar acciones (recomendado: zod/AJV) - omito validación completa aquí
 
@@ -116,7 +121,9 @@ router.post('/modify-diagram', async (req, res): Promise<void> => {
     // Implementa broadcastUpdate usando tu socket manager (Socket.IO / ws)
 
     // 6) Devolver acciones y diagrama actualizado al cliente
-    res.json({ actions, updatedDiagram });
+    // además incluir warnings si el aplicador las generó
+    const warnings = (updatedDiagram && (updatedDiagram as any)._aiWarnings) || [];
+    res.json({ actions, updatedDiagram, warnings });
   } catch (error) {
     console.error('Error modifying diagram from text:', error);
     res.status(500).json({
