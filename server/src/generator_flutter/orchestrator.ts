@@ -93,8 +93,17 @@ export async function generateFlutterFromDiagram(
     // Habilitar plataformas necesarias y realizar tareas de empaquetado/limpieza
     await enableFlutterPlatformsAndClean(projectDir, { enableWeb, enableWindows, timeoutMs });
 
-    // Crear archivo ZIP con el proyecto generado
-    await zipDirectory(projectDir, zipPath);
+    // Determinar el nombre del proyecto para la carpeta raíz del ZIP
+    const projectName = diagram.name || diagram.package || 'flutter-app';
+    // Normalizar el nombre del proyecto (eliminar caracteres especiales, espacios, etc.)
+    const normalizedProjectName = projectName
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '') || 'flutter-app';
+
+    // Crear archivo ZIP con el proyecto generado (incluyendo carpeta raíz)
+    await zipDirectory(projectDir, zipPath, normalizedProjectName);
 
     // Devolver la ruta del ZIP generado
     return zipPath;

@@ -106,7 +106,53 @@ function mapRelationsToClasses(classes: any[], relations: any[]): any[] {
       continue;
     }
 
-    // Agregar la relación a la clase origen
+    // Para relaciones ONE_TO_MANY sin mappedBy, agregar la relación inversa MANY_TO_ONE
+    // en el lado "many" para que Hibernate cree la FK
+    // IMPORTANTE: Hacer esto ANTES de agregar la relación a sourceClass para que el mappedBy se incluya
+    if (rel.type === 'ONE_TO_MANY' && !rel.mappedBy) {
+      if (!targetClass.relations) {
+        targetClass.relations = [];
+      }
+
+      // Verificar si ya existe la relación inversa
+      const existsInTarget = targetClass.relations.some((r: any) => 
+        r.source === targetClassName && r.target === sourceClassName && r.type === 'MANY_TO_ONE'
+      );
+
+      if (!existsInTarget) {
+        // Generar nombre del campo MANY_TO_ONE en la clase destino
+        // Usar el nombre de la clase en lowerCamelCase para el campo
+        // PRODUCTO -> Producto -> producto
+        const sourceJavaClass = toJavaClassName(sourceClassName);
+        // Convertir a lowerCamelCase correctamente: PRODUCTO -> producto
+        // Si la clase está en mayúsculas, convertirla a PascalCase primero
+        let manyToOneFieldName: string;
+        if (sourceJavaClass === sourceJavaClass.toUpperCase()) {
+          // Si está todo en mayúsculas, convertir a PascalCase y luego a lowerCamelCase
+          const parts = sourceClassName.split(/[^a-zA-Z0-9]+/).filter(Boolean);
+          const pascal = parts.map((p: string) => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join('');
+          manyToOneFieldName = pascal.charAt(0).toLowerCase() + pascal.slice(1);
+        } else {
+          manyToOneFieldName = toLowerCamel(sourceJavaClass);
+        }
+        
+        // Agregar la relación inversa MANY_TO_ONE en la clase destino
+        targetClass.relations.push({
+          type: 'MANY_TO_ONE',
+          source: targetClassName,
+          target: sourceClassName,
+          sourceCardinality: rel.targetCardinality,
+          targetCardinality: rel.sourceCardinality,
+          joinColumn: rel.joinColumn || undefined // Usar joinColumn si está especificado
+        });
+
+        // Actualizar la relación ONE_TO_MANY original para usar mappedBy
+        // Esto evita que Hibernate cree tablas de unión innecesarias
+        rel.mappedBy = manyToOneFieldName;
+      }
+    }
+
+    // Agregar la relación a la clase origen (después de agregar mappedBy si es necesario)
     if (!sourceClass.relations) {
       sourceClass.relations = [];
     }
@@ -122,30 +168,6 @@ function mapRelationsToClasses(classes: any[], relations: any[]): any[] {
         source: sourceClassName,
         target: targetClassName
       });
-    }
-
-    // Para relaciones ONE_TO_MANY sin mappedBy, agregar la relación inversa MANY_TO_ONE
-    // en el lado "many" para que Hibernate cree la FK
-    if (rel.type === 'ONE_TO_MANY' && !rel.mappedBy) {
-      if (!targetClass.relations) {
-        targetClass.relations = [];
-      }
-
-      // Verificar si ya existe la relación inversa
-      const existsInTarget = targetClass.relations.some((r: any) => 
-        r.source === targetClassName && r.target === sourceClassName && r.type === 'MANY_TO_ONE'
-      );
-
-      if (!existsInTarget) {
-        targetClass.relations.push({
-          type: 'MANY_TO_ONE',
-          source: targetClassName,
-          target: sourceClassName,
-          sourceCardinality: rel.targetCardinality,
-          targetCardinality: rel.sourceCardinality,
-          joinColumn: rel.joinColumn || undefined // Usar joinColumn si está especificado
-        });
-      }
     }
   }
 
@@ -647,17 +669,33 @@ function generateRelationshipAnnotation(relation: any, ownerClassName?: string):
   let helper: string | undefined;
   const targetClass = toJavaClassName(relation.target || 'Related');
   // nombre de variable en lowerCamelCase
-  const targetVar = toLowerCamel(targetClass);
+  // Si el nombre está todo en mayúsculas, convertir correctamente a lowerCamelCase
+  let targetVar: string;
+  if (targetClass === targetClass.toUpperCase()) {
+    // Si está todo en mayúsculas, convertir a lowerCamelCase correctamente
+    const parts = (relation.target || 'Related').split(/[^a-zA-Z0-9]+/).filter(Boolean);
+    const pascal = parts.map((p: string) => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join('');
+    targetVar = pascal.charAt(0).toLowerCase() + pascal.slice(1);
+  } else {
+    targetVar = toLowerCamel(targetClass);
+  }
   const sourceClass = relation.source ? toJavaClassName(relation.source) : undefined;
   const sourceVar = sourceClass ? toSafeName(sourceClass) : undefined;
 
   // Si hay cardinalidades, ajustar el tipo de relación automáticamente
+  // IMPORTANTE: No sobrescribir el tipo si ya está explícitamente definido
+  // Solo ajustar si el tipo no está definido o es ambiguo
   const srcCard = (relation.sourceCardinality || '').trim();
   const tgtCard = (relation.targetCardinality || '').trim();
-  const isMany = (c: string) => c === '*' || c === '0..*' || c === '1..*' || /\bmany\b/i.test(c);
-  const isOne = (c: string) => c === '1' || c === '0..1';
-  // No sobrescribir cuando el tipo explícito es COMPOSITION o AGGREGATION
-  if (srcCard && tgtCard && relation.type !== 'COMPOSITION' && relation.type !== 'AGGREGATION') {
+  const isMany = (c: string) => c === '*' || c === '0..*' || /\bmany\b/i.test(c);
+  const isOne = (c: string) => c === '1' || c === '0..1' || c === '1..*'; // 1..* significa "uno o muchos" pero se trata como "one" en el origen
+  
+  // No sobrescribir cuando el tipo explícito es COMPOSITION, AGGREGATION, o ya está definido explícitamente
+  // Solo ajustar si el tipo no está definido o es ambiguo
+  if (srcCard && tgtCard && relation.type !== 'COMPOSITION' && relation.type !== 'AGGREGATION' && 
+      relation.type !== 'ONE_TO_ONE' && relation.type !== 'ONE_TO_MANY' && 
+      relation.type !== 'MANY_TO_ONE' && relation.type !== 'MANY_TO_MANY' && 
+      relation.type !== 'INHERITANCE') {
     if (isOne(srcCard) && isOne(tgtCard)) relation.type = 'ONE_TO_ONE';
     else if (isMany(srcCard) && isMany(tgtCard)) relation.type = 'MANY_TO_MANY';
     else if (isMany(srcCard) && isOne(tgtCard)) relation.type = ownerClassName === sourceClass ? 'MANY_TO_ONE' : 'ONE_TO_MANY';
@@ -748,17 +786,23 @@ function generateRelationshipAnnotation(relation: any, ownerClassName?: string):
 async function generateDTOs(projectDir: string, basePackage: string, classes: any[]): Promise<void> {
   const packagePath = path.join(projectDir, 'src', 'main', 'java', basePackage.replace(/\./g, '/'), 'dto');
 
+  // Crear un mapa de clases por nombre para buscar clases padre
+  const classMap = new Map<string, any>();
+  classes.forEach(cls => {
+    classMap.set(cls.name, cls);
+  });
+
   for (const cls of classes) {
-    // Request DTO
-    const requestDtoContent = generateRequestDTO(basePackage, cls);
+    // Request DTO (incluyendo atributos heredados)
+    const requestDtoContent = generateRequestDTO(basePackage, cls, classes, classMap);
     const className = toJavaClassName(cls.name);
     await fs.promises.writeFile(
       path.join(packagePath, `${className}Request.java`),
       requestDtoContent
     );
 
-    // Response DTO
-    const responseDtoContent = generateResponseDTO(basePackage, cls);
+    // Response DTO (incluyendo atributos heredados)
+    const responseDtoContent = generateResponseDTO(basePackage, cls, classes, classMap);
     await fs.promises.writeFile(
       path.join(packagePath, `${className}Response.java`),
       responseDtoContent
@@ -796,9 +840,37 @@ function collectImportsForAttributes(attrs: any[] = []): string[] {
   return Array.from(imports);
 }
 
-function generateRequestDTO(basePackage: string, cls: any): string {
-  const imports = collectImportsForAttributes(cls.attributes);
+function generateRequestDTO(basePackage: string, cls: any, allClasses: any[] = [], classMap: Map<string, any> = new Map()): string {
+  // Recopilar todos los atributos incluyendo los heredados
+  const allAttributes: any[] = [];
+  const seenAttributeNames = new Set<string>();
+  
+  // Detectar relación de herencia
+  const inheritanceRels = (cls.relations || []).filter((r: any) => r.type === 'INHERITANCE');
+  if (inheritanceRels.length > 0) {
+    const parentClassName = inheritanceRels[0].target;
+    const parentClass = classMap.get(parentClassName);
+    
+    if (parentClass) {
+      // Agregar atributos de la clase padre primero (excluyendo ID)
+      for (const attr of (parentClass.attributes || [])) {
+        if (!isIdLikeAttribute(attr) && !seenAttributeNames.has(attr.name)) {
+          allAttributes.push(attr);
+          seenAttributeNames.add(attr.name);
+        }
+      }
+    }
+  }
+  
+  // Agregar atributos de la clase actual (excluyendo ID y evitando duplicados)
+  for (const attr of (cls.attributes || [])) {
+    if (!isIdLikeAttribute(attr) && !seenAttributeNames.has(attr.name)) {
+      allAttributes.push(attr);
+      seenAttributeNames.add(attr.name);
+    }
+  }
 
+  const imports = collectImportsForAttributes(allAttributes);
   const className = toJavaClassName(cls.name);
 
   let content = `package ${basePackage}.dto;\n\n`;
@@ -808,7 +880,7 @@ function generateRequestDTO(basePackage: string, cls: any): string {
   }
 
   // Determine DTO fields (for Request we skip ID)
-  const dtoFields = (cls.attributes || []).filter((a: any) => !isIdLikeAttribute(a));
+  const dtoFields = allAttributes;
   const hasFields = dtoFields.length > 0;
 
   // Add lombok annotations conditionally to avoid duplicate constructors when no fields exist
@@ -817,7 +889,7 @@ function generateRequestDTO(basePackage: string, cls: any): string {
     lombokAnnotations.push('@AllArgsConstructor', '@Builder');
   }
 
-  content += `import jakarta.validation.constraints.*;\nimport lombok.*;\n\n${lombokAnnotations.join('\n')}\npublic class ${className}Request {`;
+  content += `import jakarta.validation.constraints.*;\nimport lombok.*;\nimport com.fasterxml.jackson.annotation.JsonProperty;\n\n${lombokAnnotations.join('\n')}\npublic class ${className}Request {`;
 
   for (const attr of dtoFields) {
     content += `\n\n    `;
@@ -834,6 +906,9 @@ function generateRequestDTO(basePackage: string, cls: any): string {
       content += `@Email\n    `;
     }
 
+    // Agregar @JsonProperty para que Jackson use el nombre exacto del atributo
+    content += `@JsonProperty("${attr.name}")\n    `;
+
     const javaType = mapTypeToJava(attr.type);
     content += `private ${javaType} ${attr.name};`;
   }
@@ -849,8 +924,37 @@ function generateRequestDTO(basePackage: string, cls: any): string {
  * - Retorna: string con código Java del DTO de request.
  */
 
-function generateResponseDTO(basePackage: string, cls: any): string {
-  const imports = collectImportsForAttributes(cls.attributes);
+function generateResponseDTO(basePackage: string, cls: any, allClasses: any[] = [], classMap: Map<string, any> = new Map()): string {
+  // Recopilar todos los atributos incluyendo los heredados
+  const allAttributes: any[] = [];
+  const seenAttributeNames = new Set<string>();
+  
+  // Detectar relación de herencia
+  const inheritanceRels = (cls.relations || []).filter((r: any) => r.type === 'INHERITANCE');
+  if (inheritanceRels.length > 0) {
+    const parentClassName = inheritanceRels[0].target;
+    const parentClass = classMap.get(parentClassName);
+    
+    if (parentClass) {
+      // Agregar atributos de la clase padre primero
+      for (const attr of (parentClass.attributes || [])) {
+        if (!seenAttributeNames.has(attr.name)) {
+          allAttributes.push(attr);
+          seenAttributeNames.add(attr.name);
+        }
+      }
+    }
+  }
+  
+  // Agregar atributos de la clase actual (evitando duplicados)
+  for (const attr of (cls.attributes || [])) {
+    if (!seenAttributeNames.has(attr.name)) {
+      allAttributes.push(attr);
+      seenAttributeNames.add(attr.name);
+    }
+  }
+
+  const imports = collectImportsForAttributes(allAttributes);
   const className = toJavaClassName(cls.name);
   let content = `package ${basePackage}.dto;\n\n`;
 
@@ -858,7 +962,7 @@ function generateResponseDTO(basePackage: string, cls: any): string {
     content += imports.join('\n') + '\n\n';
   }
 
-  const dtoFields = (cls.attributes || []);
+  const dtoFields = allAttributes;
   const hasFields = dtoFields.length > 0;
 
   // Siempre agregamos @Builder, aunque no haya campos, porque el ServiceImpl
@@ -869,10 +973,12 @@ function generateResponseDTO(basePackage: string, cls: any): string {
     lombokAnnotations.push('@AllArgsConstructor');
   }
 
-  content += `import lombok.*;\n\n${lombokAnnotations.join('\n')}\npublic class ${className}Response {`;
+  content += `import lombok.*;\nimport com.fasterxml.jackson.annotation.JsonProperty;\n\n${lombokAnnotations.join('\n')}\npublic class ${className}Response {`;
 
   for (const attr of dtoFields) {
     content += `\n\n    `;
+    // Agregar @JsonProperty para que Jackson use el nombre exacto del atributo
+    content += `@JsonProperty("${attr.name}")\n    `;
     const javaType = mapTypeToJava(attr.type);
     content += `private ${javaType} ${attr.name};`;
   }

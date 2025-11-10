@@ -24,24 +24,147 @@ function isIdLikeAttribute(attr: any): boolean {
   return /^id([A-Z_0-9].*)?$/.test(name);
 }
 
-function normalizeType(t: string): string {
-  return (t || '').trim().toLowerCase();
+/**
+ * Mapea tipos del UML a tipos Java (mismo mapeo que springBootGenerator).
+ * - type: cadena con el tipo UML.
+ * - Retorna: tipo Java como string.
+ */
+function mapTypeToJava(type: string): string {
+  const normalizedType = type?.trim() || '';
+  
+  const typeMap: { [key: string]: string } = {
+    'String': 'String',
+    'Long': 'Long',
+    'Integer': 'Integer',
+    'Boolean': 'Boolean',
+    'LocalDateTime': 'LocalDateTime',
+    'BigDecimal': 'BigDecimal',
+    'Double': 'Double',
+    'Float': 'Float',
+    'LocalDate': 'LocalDate',
+    'Date': 'LocalDate',
+    'Time': 'LocalTime',
+    'LocalTime': 'LocalTime',
+    'Text': 'String',
+    'Varchar': 'String',
+    'Number': 'Long',
+    'Int': 'Integer',
+    'Bool': 'Boolean',
+    'DateTime': 'LocalDateTime',
+    'Timestamp': 'LocalDateTime',
+    'Decimal': 'BigDecimal',
+    'Money': 'BigDecimal',
+    'Email': 'String',
+    'URL': 'String',
+    'UUID': 'String'
+  };
+
+  // Check for exact match first
+  if (typeMap[normalizedType]) {
+    return typeMap[normalizedType];
+  }
+
+  // Check for case-insensitive match
+  const lowerType = normalizedType.toLowerCase();
+  for (const [key, value] of Object.entries(typeMap)) {
+    if (key.toLowerCase() === lowerType) {
+      return value;
+    }
+  }
+
+  // Default to String
+  return 'String';
 }
 
-function generateSampleJson(cls: any, includeId: boolean = true): string {
+/**
+ * Genera un JSON de ejemplo para una clase, excluyendo IDs y campos generados automáticamente.
+ * Incluye atributos heredados de la clase padre si hay herencia.
+ * - cls: definición de clase UML.
+ * - includeId: si incluir campos ID (por defecto false para POST/PUT).
+ * - classMap: mapa de clases por nombre para buscar clases padre.
+ * - Retorna: string JSON formateado.
+ */
+function generateSampleJson(cls: any, includeId: boolean = false, classMap: Map<string, any> = new Map()): string {
   const sample: any = {};
+  
+  // Recopilar todos los atributos incluyendo los heredados
+  const allAttributes: any[] = [];
+  
+  // Detectar relación de herencia
+  const inheritanceRels = (cls.relations || []).filter((r: any) => r.type === 'INHERITANCE');
+  if (inheritanceRels.length > 0) {
+    const parentClassName = inheritanceRels[0].target;
+    const parentClass = classMap.get(parentClassName);
+    
+    if (parentClass) {
+      // Agregar atributos de la clase padre primero (excluyendo ID si includeId es false)
+      const parentAttrs = (parentClass.attributes || []).filter((a: any) => {
+        if (!includeId && isIdLikeAttribute(a)) return false;
+        return true;
+      });
+      allAttributes.push(...parentAttrs);
+    }
+  }
+  
+  // Agregar atributos de la clase actual
+  const currentAttrs = (cls.attributes || []).filter((a: any) => {
+    if (!includeId && isIdLikeAttribute(a)) return false;
+    return true;
+  });
+  allAttributes.push(...currentAttrs);
 
-  for (const attr of cls.attributes || []) {
-    if (!includeId && isIdLikeAttribute(attr)) continue;
-    const norm = normalizeType(attr.type);
-    if (['long','integer','int','number'].includes(norm)) { sample[attr.name] = 1; continue; }
-    if (['float','double','decimal','bigdecimal','money'].includes(norm)) { sample[attr.name] = 99.99; continue; }
-    if (['boolean','bool'].includes(norm)) { sample[attr.name] = true; continue; }
-    if (['date'].includes(norm)) { sample[attr.name] = '2025-11-09'; continue; }
-    if (['datetime','timestamp','localdatetime'].includes(norm)) { sample[attr.name] = '2025-11-09T12:00:00Z'; continue; }
-    if (['time','localtime'].includes(norm)) { sample[attr.name] = '12:00:00'; continue; }
-    // default string
-    sample[attr.name] = `Sample ${attr.name}`;
+  for (const attr of allAttributes) {
+    // Excluir campos generados automáticamente (createdAt, updatedAt)
+    const attrNameLower = attr.name.toLowerCase();
+    if (attrNameLower === 'createdat' || attrNameLower === 'updatedat' || 
+        attrNameLower === 'created_at' || attrNameLower === 'updated_at') {
+      continue;
+    }
+
+    const javaType = mapTypeToJava(attr.type);
+    
+    // Generar valores de ejemplo según el tipo Java
+    switch (javaType) {
+      case 'Long':
+      case 'Integer':
+        sample[attr.name] = 1;
+        break;
+      case 'Double':
+      case 'Float':
+      case 'BigDecimal':
+        sample[attr.name] = 99.99;
+        break;
+      case 'Boolean':
+        sample[attr.name] = true;
+        break;
+      case 'LocalDate':
+        sample[attr.name] = '2025-11-10';
+        break;
+      case 'LocalDateTime':
+        sample[attr.name] = '2025-11-10T12:00:00';
+        break;
+      case 'LocalTime':
+        sample[attr.name] = '12:00:00';
+        break;
+      case 'String':
+      default:
+        // Generar valores más descriptivos según el nombre del atributo
+        const nameLower = attr.name.toLowerCase();
+        if (nameLower.includes('email')) {
+          sample[attr.name] = 'example@email.com';
+        } else if (nameLower.includes('url') || nameLower.includes('link')) {
+          sample[attr.name] = 'https://example.com';
+        } else if (nameLower.includes('phone') || nameLower.includes('telefono')) {
+          sample[attr.name] = '+1234567890';
+        } else if (nameLower.includes('name') || nameLower.includes('nombre')) {
+          sample[attr.name] = `Sample ${cls.name}`;
+        } else if (nameLower.includes('description') || nameLower.includes('descripcion')) {
+          sample[attr.name] = `Sample description for ${attr.name}`;
+        } else {
+          sample[attr.name] = `Sample ${attr.name}`;
+        }
+        break;
+    }
   }
 
   return JSON.stringify(sample, null, 2);
@@ -64,6 +187,12 @@ export async function generatePostmanCollection(projectDir: string, projectName:
     item: []
   };
 
+  // Crear un mapa de clases por nombre para buscar clases padre
+  const classMap = new Map<string, any>();
+  classes.forEach(cls => {
+    classMap.set(cls.name, cls);
+  });
+
   for (const cls of classes) {
     const className = toSafeName(toJavaClassName(cls.name));
 
@@ -79,7 +208,7 @@ export async function generatePostmanCollection(projectDir: string, projectName:
             ],
             body: {
               mode: 'raw',
-              raw: generateSampleJson(cls, false)
+              raw: generateSampleJson(cls, false, classMap)
             },
             url: {
               raw: `${defaultBase}/api/${className}s`,
@@ -116,7 +245,7 @@ export async function generatePostmanCollection(projectDir: string, projectName:
             ],
             body: {
               mode: 'raw',
-              raw: generateSampleJson(cls, false)
+              raw: generateSampleJson(cls, true, classMap) // Incluir ID para actualización
             },
             url: {
               raw: `${defaultBase}/api/${className}s/1`,

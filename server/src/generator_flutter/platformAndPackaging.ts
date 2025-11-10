@@ -10,6 +10,7 @@
  */
 
 import * as fs from 'fs';
+import * as path from 'path';
 import { promisify } from 'util';
 import archiver from 'archiver';
 import { enableFlutterPlatforms } from './enablePlatforms';
@@ -51,9 +52,10 @@ export async function enableFlutterPlatformsAndClean(
  *
  * @param sourceDir Ruta al directorio que se quiere comprimir.
  * @param outPath Ruta del archivo ZIP de salida a crear.
+ * @param projectName Nombre de la carpeta raíz dentro del ZIP (opcional, por defecto usa el nombre del directorio).
  * @returns Promise que se resuelve al completar la creación del ZIP.
  */
-export async function zipDirectory(sourceDir: string, outPath: string): Promise<void> {
+export async function zipDirectory(sourceDir: string, outPath: string, projectName?: string): Promise<void> {
   return new Promise((resolve, reject) => {
     // Stream hacia el ZIP destino
     const output = fs.createWriteStream(outPath);
@@ -69,8 +71,10 @@ export async function zipDirectory(sourceDir: string, outPath: string): Promise<
     // Conectar el archivador al stream de salida
     archive.pipe(output);
 
-    // Incluir todo el contenido del directorio fuente en la raíz del ZIP
-    archive.directory(sourceDir, false);
+    // Incluir todo el contenido del directorio fuente en el ZIP
+    // Si se proporciona projectName, se usa como carpeta raíz; si no, se usa el nombre del directorio
+    const rootFolderName = projectName || path.basename(sourceDir);
+    archive.directory(sourceDir, rootFolderName);
 
     // Finalizar la creación del ZIP (flush + close)
     archive.finalize();

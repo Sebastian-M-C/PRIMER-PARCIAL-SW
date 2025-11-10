@@ -12,11 +12,21 @@ export function generateFormPageDart(
   className: string,
   attributes: UMLAttribute[]
 ): string {
+  // Validar que haya atributos
+  if (!attributes || attributes.length === 0) {
+    throw new Error(`La clase ${className} no tiene atributos definidos. Se requiere al menos un atributo para generar la página de formulario.`);
+  }
+
   // Nombre en minúsculas/underscore para rutas e imports de archivos
   const lowerName = makeLower(className);
 
   // Atributos editables: excluimos el id (isId) porque normalmente no se edita
   const editableAttrs = attributes.filter(a => !a.isId);
+  
+  // Validar que haya al menos un atributo editable
+  if (editableAttrs.length === 0) {
+    throw new Error(`La clase ${className} no tiene atributos editables (todos son IDs). Se requiere al menos un atributo editable para generar la página de formulario.`);
+  }
 
   // Genera declaraciones de TextEditingController para cada campo editable
   const controllers = editableAttrs
@@ -50,6 +60,10 @@ export function generateFormPageDart(
   const buildObject = editableAttrs
     .map(attr => `        ${attr.name}: ${valueFromController(attr)},`)
     .join('\n');
+
+  // Encontrar el atributo ID para usar su nombre correcto
+  const idAttr = attributes.find(a => a.isId) || attributes[0];
+  const idFieldName = idAttr?.name || 'id';
 
   // Plantilla Dart completa de la página de formulario
   return `import 'package:flutter/material.dart';
@@ -101,7 +115,7 @@ ${buildObject}
 
       if (_isEditing) {
         // Si editamos, usamos el id del item original para el update
-        await _service.update(widget.item!.${attributes.find(a => a.isId)?.name || 'id'}, item);
+        await _service.update(widget.item!.${idFieldName}, item);
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('${className} actualizado correctamente')));
       } else {
         // Si creamos, llamamos al servicio create

@@ -25,8 +25,18 @@ export function generateListPageDart(
   // Nombre plural simple para mensajes/etiquetas (se agrega 's' al final)
   const pluralName = `${lowerName}s`;
 
+  // Validar que haya atributos
+  if (!attributes || attributes.length === 0) {
+    throw new Error(`La clase ${className} no tiene atributos definidos. Se requiere al menos un atributo para generar la página de lista.`);
+  }
+
   // Intentamos encontrar el atributo que actúa como id; si no hay, usamos el primero
   const idAttr = attributes.find(a => a.isId) || attributes[0];
+  
+  // Validar que idAttr existe
+  if (!idAttr) {
+    throw new Error(`La clase ${className} no tiene atributos válidos.`);
+  }
 
   // Atributos que se mostrarán en el card de la lista (excluimos el id y tomamos hasta 3)
   const displayAttrs = attributes.filter(a => !a.isId).slice(0, 3);

@@ -94,7 +94,13 @@ export async function generatePages(projectDir: string, classes: UMLClass[]): Pr
     await mkdir(classDir, { recursive: true });
 
     // Atributos pueden no estar tipados exactamente; se fuerza el cast a UMLAttribute[]
-    const attrs = (cls as any).attributes as UMLAttribute[];
+    const attrs = ((cls as any).attributes || []) as UMLAttribute[];
+
+    // Validar que la clase tenga atributos antes de generar páginas
+    if (!attrs || attrs.length === 0) {
+      console.warn(`⚠️  La clase ${cls.name} no tiene atributos. Se omitirá la generación de páginas para esta clase.`);
+      return;
+    }
 
     // Generar página de lista
     const listPageCode = generateListPageDart(cls.name, attrs);
@@ -125,7 +131,13 @@ export async function generateNavigation(projectDir: string, classes: UMLClass[]
   await mkdir(widgetsDir, { recursive: true });
   await mkdir(homeDir, { recursive: true });
 
-  const classNames = classes.map(c => c.name);
+  // Filtrar clases que tienen atributos (solo estas tienen páginas generadas)
+  const classesWithAttributes = classes.filter(cls => {
+    const attrs = ((cls as any).attributes || []) as UMLAttribute[];
+    return attrs && attrs.length > 0;
+  });
+
+  const classNames = classesWithAttributes.map(c => c.name);
   // Generar rutas y widgets globales
   await writeFile(path.join(libDir, 'routes.dart'), generateRoutesDart(classNames), 'utf-8');
   await writeFile(path.join(widgetsDir, 'app_drawer.dart'), generateSidebarDart(classNames, appName), 'utf-8');
