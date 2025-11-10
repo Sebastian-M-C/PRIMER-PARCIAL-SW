@@ -24,6 +24,9 @@ export async function generateSpringBootProject(umlData: UMLDiagramJSON): Promis
   const projectDir = path.join(tempDir, projectName);
 
   try {
+    // Mapear relaciones del array separado a cada clase
+    const classesWithRelations = mapRelationsToClasses(umlData.classes, umlData.relations || []);
+
     // Create project structure
     await createProjectStructure(projectDir, basePackage);
 
@@ -33,24 +36,24 @@ export async function generateSpringBootProject(umlData: UMLDiagramJSON): Promis
     // Generate application properties
     await generateApplicationProperties(projectDir, basePackage);
 
-    // Generate entities
-    await generateEntities(projectDir, basePackage, umlData.classes);
+    // Generate entities (ahora con relaciones mapeadas)
+    await generateEntities(projectDir, basePackage, classesWithRelations);
 
     // Generate DTOs
-    await generateDTOs(projectDir, basePackage, umlData.classes);
+    await generateDTOs(projectDir, basePackage, classesWithRelations);
 
     // Generate repositories
-    await generateRepositories(projectDir, basePackage, umlData.classes);
+    await generateRepositories(projectDir, basePackage, classesWithRelations);
 
     // Generate services
-    await generateServices(projectDir, basePackage, umlData.classes);
+    await generateServices(projectDir, basePackage, classesWithRelations);
 
     // Generate controllers
-    await generateControllers(projectDir, basePackage, umlData.classes);
+    await generateControllers(projectDir, basePackage, classesWithRelations);
 
 
     // Generate Postman collection
-    await generatePostmanCollection(projectDir, projectName, umlData.classes);
+    await generatePostmanCollection(projectDir, projectName, classesWithRelations);
 
     // Create ZIP file
     const zipBuffer = await createZipFile(projectDir, projectName);
@@ -64,6 +67,89 @@ export async function generateSpringBootProject(umlData: UMLDiagramJSON): Promis
     await removeDirWithRetry(tempDir);
     throw error;
   }
+}
+
+/**
+ * Mapea relaciones del array separado a cada clase.
+ * - classes: array de clases UML
+ * - relations: array de relaciones UML (con source y target como nombres de clases)
+ * - Retorna: array de clases con sus relaciones asignadas
+ */
+function mapRelationsToClasses(classes: any[], relations: any[]): any[] {
+  // Crear mapa de nombres de clases a objetos de clase
+  const classMap = new Map<string, any>();
+  classes.forEach(cls => {
+    classMap.set(cls.name, { ...cls, relations: cls.relations || [] });
+  });
+
+  // Mapear cada relación a la clase origen correspondiente
+  for (const rel of relations) {
+    const sourceClassName = rel.source;
+    const targetClassName = rel.target;
+
+    if (!sourceClassName || !targetClassName) {
+      console.warn(`Relación inválida: falta source o target`, rel);
+      continue;
+    }
+
+    // Buscar la clase origen y destino
+    const sourceClass = classMap.get(sourceClassName);
+    const targetClass = classMap.get(targetClassName);
+
+    if (!sourceClass) {
+      console.warn(`Clase origen no encontrada: ${sourceClassName}`, rel);
+      continue;
+    }
+
+    if (!targetClass) {
+      console.warn(`Clase destino no encontrada: ${targetClassName}`, rel);
+      continue;
+    }
+
+    // Agregar la relación a la clase origen
+    if (!sourceClass.relations) {
+      sourceClass.relations = [];
+    }
+
+    // Evitar duplicados en la clase origen
+    const existsInSource = sourceClass.relations.some((r: any) => 
+      r.source === rel.source && r.target === rel.target && r.type === rel.type
+    );
+
+    if (!existsInSource) {
+      sourceClass.relations.push({
+        ...rel,
+        source: sourceClassName,
+        target: targetClassName
+      });
+    }
+
+    // Para relaciones ONE_TO_MANY sin mappedBy, agregar la relación inversa MANY_TO_ONE
+    // en el lado "many" para que Hibernate cree la FK
+    if (rel.type === 'ONE_TO_MANY' && !rel.mappedBy) {
+      if (!targetClass.relations) {
+        targetClass.relations = [];
+      }
+
+      // Verificar si ya existe la relación inversa
+      const existsInTarget = targetClass.relations.some((r: any) => 
+        r.source === targetClassName && r.target === sourceClassName && r.type === 'MANY_TO_ONE'
+      );
+
+      if (!existsInTarget) {
+        targetClass.relations.push({
+          type: 'MANY_TO_ONE',
+          source: targetClassName,
+          target: sourceClassName,
+          sourceCardinality: rel.targetCardinality,
+          targetCardinality: rel.sourceCardinality,
+          joinColumn: rel.joinColumn || undefined // Usar joinColumn si está especificado
+        });
+      }
+    }
+  }
+
+  return Array.from(classMap.values());
 }
 
 async function removeDirWithRetry(dir: string, retries = 5, delayMs = 100): Promise<void> {
@@ -335,6 +421,8 @@ spring.jpa.hibernate.ddl-auto=update
 spring.jpa.show-sql=true
 spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.PostgreSQLDialect
 spring.jpa.properties.hibernate.format_sql=true
+# Forzar creación de constraints de llaves foráneas
+spring.jpa.properties.hibernate.hbm2ddl.auto=update
 
 # Server Configuration
 server.port=8080
@@ -368,17 +456,22 @@ async function generateEntities(projectDir: string, basePackage: string, classes
   const packagePath = path.join(projectDir, 'src', 'main', 'java', basePackage.replace(/\./g, '/'), 'entity');
   // Determinar clases que actúan como superclases (targets de INHERITANCE)
   const inheritanceTargets = new Set<string>();
+  // Determinar clases que tienen herencia (hijas)
+  const inheritanceChildren = new Set<string>();
   for (const c of classes) {
     for (const rel of c.relations || []) {
       if (rel.type === 'INHERITANCE' && rel.target) {
         inheritanceTargets.add(toJavaClassName(rel.target));
+        inheritanceChildren.add(toJavaClassName(c.name));
       }
     }
   }
 
   for (const cls of classes) {
     const className = toJavaClassName(cls.name);
-    const entityContent = generateEntityClass(basePackage, cls, className, inheritanceTargets);
+    const hasInheritance = inheritanceChildren.has(className);
+    const isParentClass = inheritanceTargets.has(className);
+    const entityContent = generateEntityClass(basePackage, cls, className, inheritanceTargets, hasInheritance || isParentClass);
     await fs.promises.writeFile(
       path.join(packagePath, `${className}.java`),
       entityContent
@@ -401,7 +494,7 @@ function isIdLikeAttribute(attr: any): boolean {
   return /^id([A-Z_0-9].*)?$/.test(name);
 }
 
-function generateEntityClass(basePackage: string, cls: any, classNameOverride?: string, inheritanceTargets?: Set<string>): string {
+function generateEntityClass(basePackage: string, cls: any, classNameOverride?: string, inheritanceTargets?: Set<string>, useSuperBuilder: boolean = false): string {
   const className = classNameOverride || toJavaClassName(cls.name);
   // Detectar atributo id aunque no tenga la marca isId;
   // esto evita duplicar campo cuando el usuario define 'id' pero olvida poner isId.
@@ -435,6 +528,12 @@ function generateEntityClass(basePackage: string, cls: any, classNameOverride?: 
     imports.push('import java.time.LocalDateTime;');
   }
 
+  // Si hay herencia, usar @SuperBuilder en lugar de @Builder
+  const builderAnnotation = useSuperBuilder ? '@SuperBuilder' : '@Builder';
+  if (useSuperBuilder && !imports.includes('import lombok.experimental.SuperBuilder;')) {
+    imports.push('import lombok.experimental.SuperBuilder;');
+  }
+
   let content = `package ${basePackage}.entity;
 
 ${imports.join('\n')}
@@ -451,11 +550,12 @@ ${inheritanceTargets?.has(className) ? '@Inheritance(strategy = InheritanceType.
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-@Builder
+${builderAnnotation}
 public class ${className}${parentClass ? ' extends ' + parentClass : ''} {`;
 
   // Add ID field if not present at all
-  if (!hasId) {
+  // IMPORTANTE: Las clases hijas (con parentClass) NO deben tener @Id porque heredan el ID de la clase padre
+  if (!hasId && !parentClass) {
     content += `
 
     @Id
@@ -465,11 +565,20 @@ public class ${className}${parentClass ? ' extends ' + parentClass : ''} {`;
 
   // Add attributes
   for (const attr of cls.attributes || []) {
+    // IMPORTANTE: Las clases hijas NO deben tener atributos tipo ID porque heredan el ID de la clase padre
+    // Si es una clase hija y el atributo es tipo ID, omitirlo completamente para evitar duplicación de columna
+    if (isIdLikeAttribute(attr) && parentClass) {
+      console.warn(`Clase hija ${className} tiene atributo tipo ID (${attr.name}). Se omite completamente porque hereda el ID de ${parentClass}`);
+      continue; // Omitir este atributo completamente
+    }
+
     content += `\n\n    `;
 
     // Add JPA annotations
-  if (isIdLikeAttribute(attr)) {
+    // Solo agregar @Id si NO es una clase hija (no tiene parentClass)
+    if (isIdLikeAttribute(attr) && !parentClass) {
       // Si el atributo ya existe y representa el id, agregar anotaciones una sola vez.
+      // Solo si NO es una clase hija (no tiene parentClass)
       content += `@Id\n    @GeneratedValue(strategy = GenerationType.IDENTITY)\n    `;
     }
 
@@ -560,6 +669,13 @@ function generateRelationshipAnnotation(relation: any, ownerClassName?: string):
       content += `@OneToOne`;
       if (relation.mappedBy) {
         content += `(mappedBy = "${relation.mappedBy}")`;
+      } else {
+        // Si no hay mappedBy, este lado es el owner y necesita @JoinColumn
+        if (relation.joinColumn) {
+          content += `\n    @JoinColumn(name = "${relation.joinColumn}")`;
+        } else {
+          content += `\n    @JoinColumn(name = "${targetVar}_id")`;
+        }
       }
       content += `\n    private ${targetClass} ${targetVar};`;
       break;
@@ -569,7 +685,11 @@ function generateRelationshipAnnotation(relation: any, ownerClassName?: string):
       if (relation.mappedBy) {
         content += `@OneToMany(mappedBy = "${relation.mappedBy}", cascade = CascadeType.ALL, fetch = FetchType.LAZY)\n    `;
       } else {
+        // Si no hay mappedBy, el lado "many" tiene la FK, pero podemos especificar @JoinColumn aquí
+        // aunque normalmente la FK está en la tabla del lado "many"
+        // Por ahora, dejamos que Hibernate lo maneje automáticamente
         content += `@OneToMany(cascade = CascadeType.ALL, fetch = FetchType.LAZY)\n    `;
+        // Nota: La FK se creará en la tabla del lado "many" (targetClass)
       }
       content += `private List<${targetClass}> ${simplePlural(targetVar)} = new ArrayList<>();`;
       break;

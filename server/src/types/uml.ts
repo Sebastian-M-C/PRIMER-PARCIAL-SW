@@ -17,9 +17,13 @@ export interface UMLMethod {
 
 export interface UMLRelation {
   type: 'ONE_TO_ONE' | 'ONE_TO_MANY' | 'MANY_TO_ONE' | 'MANY_TO_MANY' | 'INHERITANCE' | 'COMPOSITION' | 'AGGREGATION';
-  target: string;
+  source?: string; // Nombre de la clase origen
+  target: string; // Nombre de la clase destino
+  sourceCardinality?: string; // Cardinalidad en el origen
+  targetCardinality?: string; // Cardinalidad en el destino
   mappedBy?: string;
   joinColumn?: string;
+  label?: string;
 }
 
 export interface UMLClass {
@@ -32,5 +36,6 @@ export interface UMLClass {
 export interface UMLDiagramJSON {
   package: string;
   classes: UMLClass[];
+  relations?: UMLRelation[]; // Relaciones como array separado (opcional para compatibilidad)
 }
 

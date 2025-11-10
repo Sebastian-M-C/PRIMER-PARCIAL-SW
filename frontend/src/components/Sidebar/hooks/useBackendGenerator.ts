@@ -34,16 +34,22 @@ export function useBackendGenerator() {
           attributes: cls.attributes,
           methods: cls.methods
         })),
-        relations: diagram.relations.map((rel: any) => ({
-          type: rel.type,
-          source: rel.source,
-          target: rel.target,
-          sourceCardinality: rel.sourceCardinality,
-          targetCardinality: rel.targetCardinality,
-          mappedBy: rel.mappedBy,
-          joinColumn: rel.joinColumn,
-          label: rel.label
-        }))
+        relations: diagram.relations.map((rel: any) => {
+          // Convertir IDs a nombres de clases
+          const sourceClass = diagram.classes.find((c: any) => c.id === rel.source);
+          const targetClass = diagram.classes.find((c: any) => c.id === rel.target);
+          
+          return {
+            type: rel.type,
+            source: sourceClass?.name || rel.source,
+            target: targetClass?.name || rel.target,
+            sourceCardinality: rel.sourceCardinality,
+            targetCardinality: rel.targetCardinality,
+            mappedBy: rel.mappedBy,
+            joinColumn: rel.joinColumn,
+            label: rel.label
+          };
+        })
       };
 
       const response = await fetch(`${SERVER_URL}/api/generator/spring`, {
@@ -106,16 +112,22 @@ export function useBackendGenerator() {
           })),
           methods: cls.methods || []
         })),
-        relations: (diagram.relations || []).map((rel: any) => ({
-          type: rel.type,
-          source: rel.source,
-          target: rel.target,
-          sourceCardinality: rel.sourceCardinality,
-          targetCardinality: rel.targetCardinality,
-          mappedBy: rel.mappedBy,
-          joinColumn: rel.joinColumn,
-          label: rel.label
-        }))
+        relations: (diagram.relations || []).map((rel: any) => {
+          // Convertir IDs a nombres de clases
+          const sourceClass = diagram.classes.find((c: any) => c.id === rel.source);
+          const targetClass = diagram.classes.find((c: any) => c.id === rel.target);
+          
+          return {
+            type: rel.type,
+            source: sourceClass?.name || rel.source,
+            target: targetClass?.name || rel.target,
+            sourceCardinality: rel.sourceCardinality,
+            targetCardinality: rel.targetCardinality,
+            mappedBy: rel.mappedBy,
+            joinColumn: rel.joinColumn,
+            label: rel.label
+          };
+        })
       };
 
       console.log('📱 Generando app Flutter (zip: flutter-app.zip) con:', umlJson);
@@ -148,16 +160,22 @@ export function useBackendGenerator() {
           attributes: cls.attributes,
           methods: cls.methods
         })),
-        relations: diagram.relations.map((rel: any) => ({
-          type: rel.type,
-          source: rel.source,
-          target: rel.target,
-          sourceCardinality: rel.sourceCardinality,
-          targetCardinality: rel.targetCardinality,
-          mappedBy: rel.mappedBy,
-          joinColumn: rel.joinColumn,
-          label: rel.label
-        }))
+        relations: diagram.relations.map((rel: any) => {
+          // Convertir IDs a nombres de clases
+          const sourceClass = diagram.classes.find((c: any) => c.id === rel.source);
+          const targetClass = diagram.classes.find((c: any) => c.id === rel.target);
+          
+          return {
+            type: rel.type,
+            source: sourceClass?.name || rel.source,
+            target: targetClass?.name || rel.target,
+            sourceCardinality: rel.sourceCardinality,
+            targetCardinality: rel.targetCardinality,
+            mappedBy: rel.mappedBy,
+            joinColumn: rel.joinColumn,
+            label: rel.label
+          };
+        })
       };
 
       const response = await fetch(`${SERVER_URL}/api/ai/suggest`, {

@@ -3,7 +3,7 @@ import { serializeDiagram } from '../diagramSerializer';
 import type { UMLDiagram } from '../../../../types/uml';
 
 describe('serializeDiagram', () => {
-  it('serializa correctamente clases y relaciones (source/target por id)', () => {
+  it('serializa correctamente clases y relaciones (source/target como nombres de clases)', () => {
     const mockDiagram: UMLDiagram = {
       id: 'd1',
       name: 'TestDiagram',
@@ -34,8 +34,8 @@ describe('serializeDiagram', () => {
         {
           id: 'r1',
           type: 'ONE_TO_MANY' as any,
-          source: 'c1',
-          target: 'c2',
+          source: 'c1', // ID de la clase
+          target: 'c2', // ID de la clase
           sourceCardinality: '1',
           targetCardinality: '*'
         } as any
@@ -45,13 +45,19 @@ describe('serializeDiagram', () => {
     const result = serializeDiagram(mockDiagram);
 
     expect(result.name).toBe('TestDiagram');
+    expect(result.package).toBe('com.test');
     expect(result.classes).toHaveLength(2);
     expect(result.classes[0]).toMatchObject({ id: 'c1', name: 'User' });
+    expect(result.classes[1]).toMatchObject({ id: 'c2', name: 'Post' });
     expect(result.relations).toHaveLength(1);
+    // El serializador convierte IDs a nombres de clases
     expect(result.relations[0]).toMatchObject({
-      sourceId: 'c1',
-      targetId: 'c2',
-      type: 'ONE_TO_MANY'
+      id: 'r1',
+      source: 'User', // Convertido de 'c1' a 'User'
+      target: 'Post', // Convertido de 'c2' a 'Post'
+      type: 'ONE_TO_MANY',
+      sourceCardinality: '1',
+      targetCardinality: '*'
     });
   });
 });
