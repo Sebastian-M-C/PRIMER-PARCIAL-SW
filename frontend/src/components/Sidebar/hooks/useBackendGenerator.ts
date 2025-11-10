@@ -6,7 +6,11 @@ import { downloadFlutterZip } from '../../../services/generatorService'; // ✅ 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3001';
 
 export function useBackendGenerator() {
-  const { diagram, addClass, setDiagram } = useDiagramStore();
+  // tipar lo mínimo para que TypeScript sepa qué propiedades vamos a usar
+  const { diagram, setDiagram } = useDiagramStore() as {
+    diagram: any;
+    setDiagram: (d: any) => void;
+  };
   const [isGenerating, setIsGenerating] = useState(false);
 
   /**
@@ -25,12 +29,12 @@ export function useBackendGenerator() {
     try {
       const umlJson = {
         package: diagram.package,
-        classes: diagram.classes.map(cls => ({
+        classes: diagram.classes.map((cls: any) => ({
           name: cls.name,
           attributes: cls.attributes,
           methods: cls.methods
         })),
-        relations: diagram.relations.map(rel => ({
+        relations: diagram.relations.map((rel: any) => ({
           type: rel.type,
           source: rel.source,
           target: rel.target,
@@ -91,9 +95,9 @@ export function useBackendGenerator() {
       const umlJson = {
         package: diagram.package || 'com.example.app',
         name: diagram.name || 'Flutter App',
-        classes: diagram.classes.map(cls => ({
+        classes: diagram.classes.map((cls: any) => ({
           name: cls.name,
-          attributes: cls.attributes.map(attr => ({
+          attributes: (cls.attributes || []).map((attr: any) => ({
             name: attr.name,
             type: attr.type,
             nullable: attr.nullable ?? false,
@@ -102,7 +106,7 @@ export function useBackendGenerator() {
           })),
           methods: cls.methods || []
         })),
-        relations: (diagram.relations || []).map(rel => ({
+        relations: (diagram.relations || []).map((rel: any) => ({
           type: rel.type,
           source: rel.source,
           target: rel.target,
@@ -139,12 +143,12 @@ export function useBackendGenerator() {
 
       const umlJson = {
         package: diagram.package,
-        classes: diagram.classes.map(cls => ({
+        classes: diagram.classes.map((cls: any) => ({
           name: cls.name,
           attributes: cls.attributes,
           methods: cls.methods
         })),
-        relations: diagram.relations.map(rel => ({
+        relations: diagram.relations.map((rel: any) => ({
           type: rel.type,
           source: rel.source,
           target: rel.target,
