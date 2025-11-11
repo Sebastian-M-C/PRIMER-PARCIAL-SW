@@ -79,7 +79,7 @@ export async function generateFlutterFromDiagram(
     // modelos, servicios, páginas, navegación y configuración (pubspec, main, README).
     await generateModels(projectDir, diagram.classes, relationsMap);
     await generateServices(projectDir, diagram.classes, apiBaseUrl);
-    await generatePages(projectDir, diagram.classes);
+    await generatePages(projectDir, diagram.classes, relationsMap);
     await generateNavigation(projectDir, diagram.classes, diagram.name || 'Mi App');
     // pasar apiBaseUrl (puerto 8080) y timeout en segundos
     await generateConfiguration(

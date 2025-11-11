@@ -19,8 +19,10 @@ function pluralizeKebab(name: string): string {
 }
 
 export function generateServiceDart(entityName: string): string {
-  const entity = entityName.charAt(0).toUpperCase() + entityName.slice(1);
-  const entityLower = entityName.toLowerCase();
+  // entityName ya viene normalizado (UpperCamelCase)
+  const entity = entityName;
+  // Convertir a snake_case para nombres de archivo
+  const entityLower = entityName.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase();
   const route = pluralizeKebab(entityName);
 
   return `import 'dart:convert';
@@ -58,10 +60,18 @@ class ${entity}Service {
   }
 
   // READ ALL
-  Future<List<${entity}>> list() async {
+  // Incluye relaciones en la consulta usando parámetro ?include= para cargar datos relacionados
+  Future<List<${entity}>> list({List<String>? includeRelations}) async {
     try {
+      // Construir URL con parámetros de relaciones si se proporcionan
+      String url = _endpoint;
+      if (includeRelations != null && includeRelations.isNotEmpty) {
+        final includeParam = includeRelations.join(',');
+        url = '\${_endpoint}?include=\${includeParam}';
+      }
+      
       final res = await http.get(
-        Uri.parse(_endpoint),
+        Uri.parse(url),
         headers: AppConfig.defaultHeaders,  // ✅ HEADERS DESDE CONFIG
       ).timeout(const Duration(seconds: AppConfig.httpTimeout));
       
@@ -76,10 +86,18 @@ class ${entity}Service {
   }
 
   // READ BY ID
-  Future<${entity}?> getById(dynamic id) async {
+  // Incluye relaciones en la consulta usando parámetro ?include= para cargar datos relacionados
+  Future<${entity}?> getById(dynamic id, {List<String>? includeRelations}) async {
     try {
+      // Construir URL con parámetros de relaciones si se proporcionan
+      String url = '\${_endpoint}/\$id';
+      if (includeRelations != null && includeRelations.isNotEmpty) {
+        final includeParam = includeRelations.join(',');
+        url = '\${_endpoint}/\$id?include=\${includeParam}';
+      }
+      
       final res = await http.get(
-        Uri.parse('\${_endpoint}/\$id'),
+        Uri.parse(url),
         headers: AppConfig.defaultHeaders,  // ✅ HEADERS DESDE CONFIG
       ).timeout(const Duration(seconds: AppConfig.httpTimeout));
       

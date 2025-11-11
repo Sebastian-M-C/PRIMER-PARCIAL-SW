@@ -13,12 +13,14 @@
  */
 
 import { UMLAttribute } from '../modelGenerator'; // Tipo que describe atributos UML
+import { ProcessedRelation } from '../../utils/relationMapper';
 import { makeLower } from './pageHelpers'; // Helper para convertir nombres a snake_case
 
 /** Genera el código Dart de la ListPage para la clase proporcionada */
 export function generateListPageDart(
   className: string,
-  attributes: UMLAttribute[]
+  attributes: UMLAttribute[],
+  relations: ProcessedRelation[] = []
 ): string {
   // Nombre en minúsculas y con guiones bajos para rutas e imports (ej: "user_profile")
   const lowerName = makeLower(className);
@@ -44,6 +46,22 @@ export function generateListPageDart(
   const displayFields = displayAttrs
     .map(attr => `                Text('${attr.name}: \${item.${attr.name}}'),`)
     .join('\n');
+  
+  // Campos de relaciones para mostrar en el card
+  const relationFields = relations.map(rel => {
+    if (rel.isList) {
+      // Lista: mostrar cantidad de elementos
+      return `                if (item.${rel.fieldName}.isNotEmpty) Text('${rel.fieldName}: \${item.${rel.fieldName}.length} elemento(s)'),`;
+    } else {
+      // Objeto único: mostrar ID o nombre si está disponible
+      return `                if (item.${rel.fieldName} != null) Text('${rel.fieldName}: \${item.${rel.fieldName}.${idAttr.name} ?? "N/A"}'),`;
+    }
+  }).join('\n');
+  
+  // Código para cargar relaciones en _loadData
+  const loadRelationsCode = relations.length > 0
+    ? `final relationNames = [${relations.map(r => `'${r.fieldName}'`).join(', ')}];\n      final items = await _service.list(includeRelations: relationNames);`
+    : 'final items = await _service.list();';
 
   // Plantilla completa retornada como string (contenido de lib/pages/<lower>/<lower>_list_page.dart)
   return `import 'package:flutter/material.dart';
@@ -84,6 +102,7 @@ class _${className}ListPageState extends State<${className}ListPage> {
   }
 
   /// Carga los datos desde el servicio y actualiza el estado
+  /// Incluye relaciones automáticamente si están definidas
   Future<void> _loadData() async {
     setState(() {
       _isLoading = true;
@@ -91,7 +110,8 @@ class _${className}ListPageState extends State<${className}ListPage> {
       _operationErrorMessage = null;
     });
     try {
-      final items = await _service.list();
+      // Obtener nombres de relaciones para incluir en la consulta
+      ${loadRelationsCode}
       setState(() { _items = items; _isLoading = false; });
     } catch (e) {
       // Fallo en la carga inicial: dejamos la lista vacía y guardamos el mensaje,
@@ -208,9 +228,9 @@ class _${className}ListPageState extends State<${className}ListPage> {
           return Card(margin: const EdgeInsets.symmetric(vertical: 4), child: ListTile(
             // Título muestra el id del item
             title: Text('${className} #\${item.${idAttr.name}}'),
-            // Subtítulo muestra los campos seleccionados (displayFields)
+            // Subtítulo muestra los campos seleccionados (displayFields) y relaciones
             subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-${displayFields}
+${displayFields}${relationFields ? '\n' + relationFields : ''}
             ]),
             // Botón eliminar que llama a _deleteItem
             trailing: IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () => _deleteItem(item)),
