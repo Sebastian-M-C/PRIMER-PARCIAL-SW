@@ -1,6 +1,5 @@
 import { UMLDiagramJSON } from '../types/uml';
-
-const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3001';
+import { SERVER_URL } from '../config';
 
 /**
  * Envía el diagrama al backend (/api/generator/flutter) y fuerza la descarga

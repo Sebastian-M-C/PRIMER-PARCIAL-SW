@@ -2,8 +2,7 @@ import { useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useDiagramStore } from '../store/useDiagramStore';
 import { UMLDiagramJSON } from '../types/uml';
-
-const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3001';
+import { SERVER_URL } from '../config';
 
 export const useSocket = (diagramId?: string) => {
   const socketRef = useRef<Socket | null>(null);

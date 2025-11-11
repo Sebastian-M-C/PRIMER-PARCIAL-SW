@@ -24,8 +24,7 @@ export interface ParseDiagramResult {
   };
 }
 
-// URL del backend (ajustar según entorno)
-const BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+import { API_BASE } from '../config';
 
 /**
  * Sube una imagen y la convierte en diagrama UML
@@ -40,7 +39,7 @@ export async function uploadImageFile(
   onProgress?: (pct: number) => void
 ): Promise<ParseDiagramResult> {
   return new Promise((resolve, reject) => {
-    const url = `${BASE}/api/ai/image-to-diagram`;
+  const url = `${API_BASE}/api/ai/image-to-diagram`;
     const form = new FormData();
     form.append('file', file);
     
@@ -100,7 +99,7 @@ export async function sendImagePath(
   imagePath: string,
   options: { lang?: string; useLLM?: boolean } = {}
 ): Promise<ParseDiagramResult> {
-  const url = `${BASE}/api/ai/image-to-diagram`;
+  const url = `${API_BASE}/api/ai/image-to-diagram`;
   const body: any = { imagePath };
   
   // Agregar opciones al body

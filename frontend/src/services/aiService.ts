@@ -5,6 +5,8 @@
  * - Valida respuesta y lanza errores en caso necesario
  */
 
+import { apiPath } from '../config';
+
 export type UMLActionType =
   | 'CREATE_CLASS' | 'UPDATE_CLASS' | 'DELETE_CLASS' | 'RENAME_CLASS'
   | 'ADD_ATTRIBUTE' | 'UPDATE_ATTRIBUTE' | 'DELETE_ATTRIBUTE'
@@ -59,7 +61,9 @@ export async function modifyDiagram(text: string, diagram: any, opts?: { baseUrl
   if (!text || typeof text !== 'string') throw new Error('Invalid "text" parameter');
   if (!diagram || typeof diagram !== 'object') throw new Error('Invalid "diagram" parameter');
 
-  const url = (opts?.baseUrl ?? '/api/ai/modify-diagram');
+  // default to centralized API_BASE if no baseUrl provided
+  // keep supporting an optional custom baseUrl for flexibility
+  const url = (opts?.baseUrl ?? apiPath('/api/ai/modify-diagram'));
 
   const resp = await fetch(url, {
     method: 'POST',
