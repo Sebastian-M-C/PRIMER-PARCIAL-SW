@@ -1,6 +1,6 @@
 import React from 'react';
 import { Line, Group, Text, Circle } from 'react-konva';
-import { UMLRelation } from '../../types/uml';
+import { UMLRelation } from '../../../types/uml';
 import { PRIMARY_START, PRIMARY_DARK } from '../../style/theme';
 
 interface ConnectionLineProps {

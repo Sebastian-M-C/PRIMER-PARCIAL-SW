@@ -34,18 +34,26 @@ import { API_BASE } from '../config';
  * @returns Promise con el resultado del análisis
  */
 export async function uploadImageFile(
-  file: File, 
-  options: { lang?: string; useLLM?: boolean } = {},
+  file: File,
+  // backward-compatible: allow passing onProgress as the 2nd argument
+  options: { lang?: string; useLLM?: boolean } | ((pct: number) => void) = {},
   onProgress?: (pct: number) => void
 ): Promise<ParseDiagramResult> {
+  // normalize args: if options is a function, treat it as onProgress
+  if (typeof options === 'function') {
+    onProgress = options as (pct: number) => void;
+    options = {};
+  }
+
   return new Promise((resolve, reject) => {
   const url = `${API_BASE}/api/ai/image-to-diagram`;
     const form = new FormData();
     form.append('file', file);
     
-    // Agregar opciones si están presentes
-    if (options.lang) form.append('lang', options.lang);
-    if (options.useLLM === false) form.append('useLLM', 'false');
+  // Agregar opciones si están presentes
+  const opts = options as { lang?: string; useLLM?: boolean };
+  if (opts.lang) form.append('lang', opts.lang);
+  if (opts.useLLM === false) form.append('useLLM', 'false');
 
     // Usamos XMLHttpRequest para poder reportar progreso de upload
     const xhr = new XMLHttpRequest();

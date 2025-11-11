@@ -1,6 +1,6 @@
 import { UMLRelation } from '../../types/uml';
 
-export const createRelationsSlice = (set: any, get: any) => ({
+export const createRelationsSlice = (set: any) => ({
   relations: [] as UMLRelation[],
 
   addRelation: (relation: UMLRelation | Omit<UMLRelation, 'id'>) => set((state: any) => {

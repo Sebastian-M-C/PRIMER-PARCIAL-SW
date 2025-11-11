@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Group, Line, Text, Rect } from 'react-konva';
-import { UMLRelation } from '../../types/uml';
+import { UMLRelation } from '../../../types/uml';
 
 interface RelationCreatorProps {
   startX: number;

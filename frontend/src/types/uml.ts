@@ -114,3 +114,20 @@ export type Diagram = {
   relations: UMLRelation[];
 };
 
+/**
+ * Tipos para colaboración en tiempo real (frontend store)
+ */
+export interface CollaborationUser {
+  id: string;
+  name?: string;
+  color?: string;
+  cursor?: { x: number; y: number } | null;
+  connectedAt?: string | Date;
+}
+
+export interface CollaborationLock {
+  elementId: string;
+  userId: string;
+  timestamp?: string | number | Date;
+}
+

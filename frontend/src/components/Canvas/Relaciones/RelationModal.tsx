@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { UMLRelation } from '../../types/uml';
+import { UMLRelation } from '../../../types/uml';
 
 const RELATION_TYPES = [
   { value: 'ONE_TO_ONE', label: 'Uno a Uno' },
@@ -52,7 +52,7 @@ export const RelationModal: React.FC<RelationModalProps> = ({
   targetClassName = '',
   initialRelation
 }) => {
-  const [type, setType] = useState<string>('ONE_TO_ONE');
+  const [type, setType] = useState<UMLRelation['type']>('ONE_TO_ONE');
   const [sourceCardinality, setSourceCardinality] = useState<string>('1');
   const [targetCardinality, setTargetCardinality] = useState<string>('1');
   const [label, setLabel] = useState<string>('');
@@ -96,7 +96,8 @@ export const RelationModal: React.FC<RelationModalProps> = ({
 
     // If opened for editing, prefill fields from initialRelation
     if (initialRelation) {
-      setType(initialRelation.type || 'ONE_TO_ONE');
+      // initialRelation.type may be inferred as string; cast to the exact union
+      setType((initialRelation.type as UMLRelation['type']) ?? 'ONE_TO_ONE');
       setSourceCardinality(initialRelation.sourceCardinality || '1');
       setTargetCardinality(initialRelation.targetCardinality || '1');
       setLabel(initialRelation.label || '');
@@ -264,7 +265,7 @@ export const RelationModal: React.FC<RelationModalProps> = ({
         <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: 12 }}>
             <label style={labelStyle}>Tipo</label>
-            <select value={type} onChange={e => setType(e.target.value)} style={inputStyle}>
+            <select value={type} onChange={e => setType(e.target.value as UMLRelation['type'])} style={inputStyle}>
               {RELATION_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
             </select>
           </div>

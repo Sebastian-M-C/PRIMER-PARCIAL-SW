@@ -73,7 +73,7 @@ export const ClassNode: React.FC<ClassNodeProps> = ({
   };
 
   // Evitar que el Group padre comience a arrastrarse al presionar el handle
-  const handleConnectionPointMouseDown = (e: Konva.KonvaEventObject<MouseEvent>, x: number, y: number) => {
+  const handleConnectionPointMouseDown = (e: Konva.KonvaEventObject<MouseEvent>, _x: number, _y: number) => {
     e.cancelBubble = true;
     e.evt.stopPropagation();
 

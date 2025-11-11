@@ -17,10 +17,12 @@ import { createCollaborationSlice } from './slices/collaborationSlice';
  *
  * Además expone campos UI de selección (selectedClassId, selectedRelationId).
  */
-export const useDiagramStore = create((set, get) => ({
+// Use a loose any for the store type to avoid wide-ranging 'unknown' inference issues
+// TODO: replace `any` with a precise interface for better type-safety
+export const useDiagramStore = create<any>((set: any, get: any) => ({
   // Inicializa/mergea todos los slices en un único store
   ...createDiagramSlice(set, get),
-  ...createRelationsSlice(set, get),
+  ...createRelationsSlice(set),
   ...createCollaborationSlice(set, get),
 
   // selección UI (puede residir aquí o en un slice)

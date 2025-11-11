@@ -6,7 +6,6 @@ export function useClassEditor() {
     selectedClassId,
     getClassById,
     updateClass,
-    addClass,
     deleteClass
   } = useDiagramStore();
 
@@ -53,7 +52,7 @@ export function useClassEditor() {
   const handleDeleteAttribute = (index: number) => {
     if (!selectedClass) return;
 
-    const updatedAttributes = selectedClass.attributes.filter((_, i) => i !== index);
+    const updatedAttributes = selectedClass.attributes.filter((_: UMLAttribute, i: number) => i !== index);
     handleClassUpdate({ attributes: updatedAttributes });
   };
 
@@ -88,7 +87,7 @@ export function useClassEditor() {
   const handleDeleteMethod = (index: number) => {
     if (!selectedClass) return;
 
-    const updatedMethods = selectedClass.methods.filter((_, i) => i !== index);
+    const updatedMethods = selectedClass.methods.filter((_: UMLMethod, i: number) => i !== index);
     handleClassUpdate({ methods: updatedMethods });
   };
 

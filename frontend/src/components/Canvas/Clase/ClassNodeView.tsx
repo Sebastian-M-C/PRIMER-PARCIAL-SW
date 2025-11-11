@@ -33,7 +33,7 @@ export const ClassNodeView: React.FC<ClassNodeViewProps> = ({
   onConnectionPointMouseDown,
   disableDragging = false
 }) => {
-  const { position = {}, width = 180, name = '', attributes = [], methods = [] } = umlClass;
+  const { position, width = 180, name = '', attributes = [], methods = [] } = umlClass;
 
   const headerHeight = 30;
   const attributeHeight = 20;
@@ -63,8 +63,8 @@ export const ClassNodeView: React.FC<ClassNodeViewProps> = ({
     return { x: 80 + col * spacingX, y: 80 + row * spacingY };
   }, [index]);
 
-  const posX = (typeof position.x === 'number') ? position.x : fallbackPos.x;
-  const posY = (typeof position.y === 'number') ? position.y : fallbackPos.y;
+  const posX = (typeof position?.x === 'number') ? position!.x : fallbackPos.x;
+  const posY = (typeof position?.y === 'number') ? position!.y : fallbackPos.y;
 
   // onDragEnd: Konva event proporciona target.x()/y() en coords del layer (correctas)
   const handleDragEnd = (e: Konva.KonvaEventObject<DragEvent>) => {

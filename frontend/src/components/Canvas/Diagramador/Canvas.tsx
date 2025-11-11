@@ -183,9 +183,9 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
     : { nombreOrigen: 'Desconocido', nombreDestino: 'Desconocido' };
 
   // Obtener relación a editar (si hay)
-  const relationToEdit = editRelationId ? diagram?.relations?.find(r => r.id === editRelationId) : undefined;
-  const editSourceName = relationToEdit ? diagram?.classes?.find(c => c.id === relationToEdit.source)?.name ?? 'Desconocido' : '';
-  const editTargetName = relationToEdit ? diagram?.classes?.find(c => c.id === relationToEdit.target)?.name ?? 'Desconocido' : '';
+  const relationToEdit = editRelationId ? (diagram?.relations as UMLRelation[] | undefined)?.find(r => r.id === editRelationId) : undefined;
+  const editSourceName = relationToEdit ? (diagram?.classes as UMLClass[] | undefined)?.find(c => c.id === relationToEdit.source)?.name ?? 'Desconocido' : '';
+  const editTargetName = relationToEdit ? (diagram?.classes as UMLClass[] | undefined)?.find(c => c.id === relationToEdit.target)?.name ?? 'Desconocido' : '';
 
   // --- JSX principal ---
   return (
@@ -281,8 +281,8 @@ export const Canvas: React.FC<CanvasProps> = ({ width, height }) => {
             if (relationData.type === 'MANY_TO_MANY' && joinConfig) {
               const sourceId = relacionPendiente.sourceId;
               const targetId = relacionPendiente.targetId;
-              const sourceCls = diagram?.classes?.find(c => c.id === sourceId);
-              const targetCls = diagram?.classes?.find(c => c.id === targetId);
+              const sourceCls = (diagram?.classes as UMLClass[] | undefined)?.find(c => c.id === sourceId);
+              const targetCls = (diagram?.classes as UMLClass[] | undefined)?.find(c => c.id === targetId);
               if (!sourceCls || !targetCls) {
                 console.warn('Clases origen/target no encontradas.');
                 cancelarRelacion();
