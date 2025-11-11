@@ -12,6 +12,23 @@ import { ProcessedRelation } from './utils/relationMapper';
 import { generateConfigDart } from './generators/configGenerator';
 
 /**
+ * Normaliza un nombre de clase a UpperCamelCase (PascalCase)
+ * Ejemplos: "PRODUCTO_VENTA_DETALLE" -> "ProductoVentaDetalle", "user_profile" -> "UserProfile"
+ */
+function normalizeClassName(name: string): string {
+  if (!name) return 'GeneratedClass';
+  
+  // Dividir por guiones bajos, espacios, o cambios de mayúsculas
+  const parts = name
+    .replace(/([a-z])([A-Z])/g, '$1_$2') // camelCase -> snake_case
+    .split(/[\s_]+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase());
+  
+  return parts.join('');
+}
+
+/**
  * Crea la estructura de directorios mínima necesaria para el proyecto Flutter.
  *
  * - lib/models: modelos de datos
@@ -47,10 +64,13 @@ export async function generateModels(
   const modelsDir = path.join(projectDir, 'lib/models');
   // Generar modelos en paralelo para mejorar rendimiento
   await Promise.all(classes.map(async (cls) => {
+    const normalizedName = normalizeClassName(cls.name);
     const relations = relationsMap.get(cls.name) || [];
-    const modelCode = generateModelDart(cls, relations);
-    // Nombre de archivo: clase en minúsculas (ej. User => user.dart)
-    const fileName = `${cls.name.toLowerCase()}.dart`;
+    // Crear una copia de la clase con el nombre normalizado
+    const normalizedClass = { ...cls, name: normalizedName };
+    const modelCode = generateModelDart(normalizedClass, relations);
+    // Nombre de archivo: clase normalizada en minúsculas (ej. ProductoVentaDetalle => producto_venta_detalle.dart)
+    const fileName = `${normalizedName.toLowerCase().replace(/([a-z])([A-Z])/g, '$1_$2')}.dart`;
     await writeFile(path.join(modelsDir, fileName), modelCode, 'utf-8');
   }));
 }
@@ -68,8 +88,9 @@ export async function generateModels(
 export async function generateServices(projectDir: string, classes: UMLClass[], apiBaseUrl: string): Promise<void> {
   const servicesDir = path.join(projectDir, 'lib/services');
   await Promise.all(classes.map(async (cls) => {
-    const serviceCode = generateServiceDart(cls.name);
-    const fileName = `${cls.name.toLowerCase()}_service.dart`;
+    const normalizedName = normalizeClassName(cls.name);
+    const serviceCode = generateServiceDart(normalizedName);
+    const fileName = `${normalizedName.toLowerCase().replace(/([a-z])([A-Z])/g, '$1_$2')}_service.dart`;
     await writeFile(path.join(servicesDir, fileName), serviceCode, 'utf-8');
   }));
 }
@@ -85,7 +106,11 @@ export async function generateServices(projectDir: string, classes: UMLClass[], 
  * @param projectDir Ruta base del proyecto
  * @param classes Array de clases UML
  */
-export async function generatePages(projectDir: string, classes: UMLClass[]): Promise<void> {
+export async function generatePages(
+  projectDir: string, 
+  classes: UMLClass[],
+  relationsMap: Map<string, ProcessedRelation[]> = new Map()
+): Promise<void> {
   const pagesDir = path.join(projectDir, 'lib/pages');
   await Promise.all(classes.map(async (cls) => {
     const lowerName = cls.name.toLowerCase();
@@ -102,12 +127,18 @@ export async function generatePages(projectDir: string, classes: UMLClass[]): Pr
       return;
     }
 
-    // Generar página de lista
-    const listPageCode = generateListPageDart(cls.name, attrs);
+    // Normalizar nombre de clase
+    const normalizedName = normalizeClassName(cls.name);
+    
+    // Obtener relaciones para esta clase (se usa en ambas páginas)
+    const relations = relationsMap.get(cls.name) || [];
+    
+    // Generar página de lista (incluyendo relaciones)
+    const listPageCode = generateListPageDart(normalizedName, attrs, relations);
     await writeFile(path.join(classDir, `${lowerName}_list_page.dart`), listPageCode, 'utf-8');
 
-    // Generar página de formulario/edición
-    const formPageCode = generateFormPageDart(cls.name, attrs);
+    // Generar página de formulario/edición (incluyendo relaciones)
+    const formPageCode = generateFormPageDart(normalizedName, attrs, relations);
     await writeFile(path.join(classDir, `${lowerName}_form_page.dart`), formPageCode, 'utf-8');
   }));
 }
@@ -137,7 +168,7 @@ export async function generateNavigation(projectDir: string, classes: UMLClass[]
     return attrs && attrs.length > 0;
   });
 
-  const classNames = classesWithAttributes.map(c => c.name);
+  const classNames = classesWithAttributes.map(c => normalizeClassName(c.name));
   // Generar rutas y widgets globales
   await writeFile(path.join(libDir, 'routes.dart'), generateRoutesDart(classNames), 'utf-8');
   await writeFile(path.join(widgetsDir, 'app_drawer.dart'), generateSidebarDart(classNames, appName), 'utf-8');

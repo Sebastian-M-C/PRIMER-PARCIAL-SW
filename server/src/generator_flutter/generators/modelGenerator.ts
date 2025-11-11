@@ -2,6 +2,23 @@ import { mapUmlTypeToDart, generateFromJsonCode, generateToJsonCode } from '../u
 import { ProcessedRelation } from '../utils/relationMapper';
 
 /**
+ * Normaliza un nombre de clase a UpperCamelCase (PascalCase)
+ * Ejemplos: "PRODUCTO_VENTA_DETALLE" -> "ProductoVentaDetalle", "user_profile" -> "UserProfile"
+ */
+function normalizeClassName(name: string): string {
+  if (!name) return 'GeneratedClass';
+  
+  // Dividir por guiones bajos, espacios, o cambios de mayúsculas
+  const parts = name
+    .replace(/([a-z])([A-Z])/g, '$1_$2') // camelCase -> snake_case
+    .split(/[\s_]+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase());
+  
+  return parts.join('');
+}
+
+/**
  * Representa un atributo de clase UML
  */
 export interface UMLAttribute {
@@ -10,6 +27,26 @@ export interface UMLAttribute {
   nullable?: boolean;
   unique?: boolean;
   isId?: boolean;
+}
+
+/**
+ * Detecta si un atributo es un ID por nombre o por la propiedad isId
+ * @param attr - Atributo a verificar
+ * @returns true si el atributo es un ID
+ */
+function isIdAttribute(attr: UMLAttribute): boolean {
+  if (attr.isId) return true;
+  
+  // Detectar IDs por nombre común (case-insensitive)
+  const nameLower = attr.name.toLowerCase();
+  const idPatterns = [
+    /^id$/,           // "id", "Id", "ID"
+    /^id[a-z0-9]/,    // "idFactura", "idProducto", "id123"
+    /^[a-z0-9]*id$/,  // "userId", "productId", "userid"
+    /^id_[a-z0-9]/,   // "id_user", "id_producto"
+  ];
+  
+  return idPatterns.some(pattern => pattern.test(nameLower));
 }
 
 /**
@@ -39,13 +76,17 @@ export function generateModelDart(
   umlClass: UMLClass,
   relations: ProcessedRelation[] = []
 ): string {
-  const className = umlClass.name;
+  // Normalizar nombre de clase a UpperCamelCase
+  const className = normalizeClassName(umlClass.name);
   const attributes = umlClass.attributes || [];
+  
+  // Verificar si la clase tiene campos (atributos o relaciones)
+  const hasFields = attributes.length > 0 || relations.length > 0;
 
   // ============ CAMPOS ============
   
   const attributeFields = attributes.map(attr => {
-    const isId = attr.isId ?? false;
+    const isId = isIdAttribute(attr);
     const dartType = mapUmlTypeToDart(attr.type);
     // Si es ID lo tratamos como nullable para permitir creación sin id
     const nullSuffix = (attr.nullable || isId) ? '?' : '';
@@ -59,11 +100,14 @@ export function generateModelDart(
   });
 
   const allFields = [...attributeFields, ...relationFields].join('\n');
+  
+  // Si no hay campos, agregar un campo mínimo para evitar errores de sintaxis
+  const fieldsContent = hasFields ? allFields : '  // Clase sin atributos ni relaciones (tabla intermedia)';
 
   // ============ CONSTRUCTOR ============
   
   const attributeParams = attributes.map(attr => {
-    const isId = attr.isId ?? false;
+    const isId = isIdAttribute(attr);
     const required = (attr.nullable || isId) ? '' : 'required ';
     return `    ${required}this.${attr.name},`;
   });
@@ -74,6 +118,9 @@ export function generateModelDart(
   });
 
   const allParams = [...attributeParams, ...relationParams].join('\n');
+  
+  // Si no hay parámetros, el constructor debe estar vacío pero válido
+  const constructorParams = hasFields ? allParams : '';
 
   // ============ FROM JSON ============
   
@@ -99,6 +146,7 @@ export function generateModelDart(
   });
 
   const allFromJson = [...attributesFromJson, ...relationsFromJson].join('\n');
+  const fromJsonContent = hasFields ? allFromJson : '';
 
   // ============ TO JSON ============
   
@@ -117,6 +165,7 @@ export function generateModelDart(
   });
 
   const allToJson = [...attributesToJson, ...relationsToJson].join('\n');
+  const toJsonContent = hasFields ? allToJson : '';
 
   // ============ COPY WITH ============
   
@@ -136,53 +185,70 @@ export function generateModelDart(
     ...attributes.map(attr => `      ${attr.name}: ${attr.name} ?? this.${attr.name},`),
     ...relations.map(rel => `      ${rel.fieldName}: ${rel.fieldName} ?? this.${rel.fieldName},`)
   ].join('\n');
+  
+  const copyWithParamsContent = hasFields ? copyWithParams : '';
+  const copyWithAssignmentsContent = hasFields ? copyWithAssignments : '';
 
   // ============ TEMPLATE FINAL ============
+  
+  // Generar toString, operator ==, y hashCode
+  // Si no hay atributos, usar implementaciones por defecto
+  const toStringContent = hasFields && attributes.length > 0
+    ? `'${className}(${attributes.map(a => `${a.name}: \$${a.name}`).join(', ')})'`
+    : `'${className}()'`;
+  
+  const equalsContent = hasFields && attributes.length > 0
+    ? `other is ${className} && ${attributes.map(a => `other.${a.name} == ${a.name}`).join(' && ')}`
+    : `other is ${className}`;
+  
+  const hashCodeContent = hasFields && attributes.length > 0
+    ? `Object.hash(${attributes.map(a => a.name).join(', ')})`
+    : `0`;
 
   return `/// Modelo generado: ${className}
 /// Representa una entidad del dominio con sus atributos y relaciones
 class ${className} {
-${allFields}
+${fieldsContent}
 
   /// Constructor con parámetros nombrados
   const ${className}({
-${allParams}
+${constructorParams}
   });
 
   /// Crea una instancia desde un mapa JSON
   factory ${className}.fromJson(Map<String, dynamic> json) {
     return ${className}(
-${allFromJson}
+${fromJsonContent}
     );
   }
 
   /// Convierte la instancia a un mapa JSON
   Map<String, dynamic> toJson() {
     return {
-${allToJson}
+${toJsonContent}
     };
   }
 
   /// Crea una copia con campos modificados (inmutabilidad)
   ${className} copyWith({
-${copyWithParams}
+${copyWithParamsContent}
   }) {
     return ${className}(
-${copyWithAssignments}
+${copyWithAssignmentsContent}
     );
   }
 
   @override
-  String toString() => '${className}(${attributes.map(a => `${a.name}: \$${a.name}`).join(', ')})';
+  String toString() => ${toStringContent};
 
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
-    return other is ${className} && ${attributes.map(a => `other.${a.name} == ${a.name}`).join(' && ')};
+    return ${equalsContent};
   }
 
   @override
-  int get hashCode => Object.hash(${attributes.map(a => a.name).join(', ')});
+  int get hashCode => ${hashCodeContent};
 }
 `;
 }
