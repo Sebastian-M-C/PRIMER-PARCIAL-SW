@@ -137,3 +137,4 @@ target/
 /server/out-smoke.zip
 /out-smoke.zip
 
+.env
